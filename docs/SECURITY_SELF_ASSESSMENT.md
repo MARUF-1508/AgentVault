@@ -19,10 +19,10 @@ _Submission item 5: permission-tier implementation and known-risk list. Keep thi
 |---|---|---|
 | T0 Read-only | Read tools (balances, portfolio, swap quote, policy, history) never reach the executor | `test/tools.test.ts`, `test/portfolio.test.ts`, `test/swap.test.ts` |
 | T1 Auto | Allowlisted recipient, amount ≤ `autoMaxPerTx`, within `dailyBudget`; bounded approval to allowlisted spender; bounded swap within `autoMaxSlippageBps` and `autoMaxPerTx` | `policy.test.ts` "T1 auto", "swaps" |
-| T2 Confirm | New recipient, or amount > `autoMaxPerTx`; swap slippage above `autoMaxSlippageBps`; human types "yes" after seeing reasons; policy re-checked after approval | `policy.test.ts` "T2 confirm", "swaps" |
-| T3 Deny | Paused, wrong chain, rate limit, unknown token, zero/malformed amount, denylisted, > `hardMaxPerTx`, over `dailyBudget`, unlimited approval, non-allowlisted spender; swap to an unknown/ non-allowlisted router, slippage above `maxSlippageBps`, no market quote, same token in/out | `policy.test.ts` risk controls + "swaps" |
+| T2 Confirm | New recipient, or amount > `autoMaxPerTx`, or a non-allowlisted **contract** recipient (`risk.contractRecipients: confirm`); swap slippage above `autoMaxSlippageBps`; human types "yes" after seeing reasons; policy re-checked after approval | `policy.test.ts` "T2 confirm", "swaps", "Day 3 risk controls" |
+| T3 Deny | Paused, wrong chain, rate limit, unknown token, zero/malformed amount, denylisted, **block-listed address**, **allowlisted-address lookalike (poisoning)**, **contract recipient when `risk.contractRecipients: deny`**, **single request above the portfolio anomaly share**, > `hardMaxPerTx`, over `dailyBudget`, unlimited approval, non-allowlisted spender; swap to an unknown/ non-allowlisted router, slippage above `maxSlippageBps`, no market quote, same token in/out | `policy.test.ts` "risk controls" + "swaps" + "Day 3 risk controls", `test/risk.test.ts` |
 
-Evaluation order: kill switch → chain → rate limit → swap rules (venue → spender allowlist → slippage → token/amount → quote) or asset → amount → denylist → approval rules → hard cap → daily budget → recipient/auto-limit → tier.
+Evaluation order: kill switch → chain → rate limit → then **swaps**: policy → tokens → venue → spender allowlist → slippage cap → amount → hard cap → daily budget → anomaly guard → market quote → tier; or **transfers/approvals**: asset → amount → denylist → address risk (block list → poisoning → contract) → approval rules / hard cap → daily budget → known-recipient & auto-limit → anomaly guard → tier. Risk findings can only raise a tier, never lower it.
 
 ## 3. Controls
 
@@ -41,17 +41,17 @@ Evaluation order: kill switch → chain → rate limit → swap rules (venue →
 | Swaps priced by the DEX quoter; the engine derives the on-chain minimum output and caps slippage; only the allowlisted router is called | ✅ |
 | Swap approvals are bounded to exactly `amountIn`, never unlimited, and go through the engine themselves | ✅ |
 | Scheduled rules are user config (no LLM write path); each run becomes a normal intent through the executor | ✅ |
-| Prompt-injection defence (untrusted-data wrapping + test) | ⏳ Day 3 |
-| Address-poisoning / lookalike detection | ⏳ Day 3 |
-| Contract-recipient and risk-list checks | ⏳ Day 3 |
-| On-chain limits (AgentVault) | ⏳ Day 5 |
+| Prompt-injection defence: all tool output delimited as `<untrusted>` with forged tags neutralised; system prompt marks it as data | ✅ |
+| Address risk: contract-code check, local block list and address-poisoning lookalikes raise/deny before signing | ✅ |
+| Portfolio anomaly guard: a single request above `risk.maxActionPctOfPortfolio`% of total value is refused | ✅ |
+| On-chain limits (AgentVault): Foundry tests written (per-tx cap, daily reset, non-agent, pause, allowlist, owner-only) | ✅ tests / ⏳ deploy |
 
 ## 4. Known-risk list
 
 | # | Risk | Likelihood | Impact | Mitigation | Residual |
 |---|---|---|---|---|---|
 | R1 | Agent hot key stolen from `.env` | Low | Attacker bypasses off-chain policy | Testnet only; AgentVault caps on-chain loss to one day's limit | Off-chain limits don't apply to a stolen key until the vault is used |
-| R2 | Prompt injection makes the LLM propose a malicious transfer | Medium | Attempted theft | Policy firewall; new recipients are T2; amounts capped | A human could approve a bad T2 if they don't read the card |
+| R2 | Prompt injection makes the LLM propose a malicious transfer | Medium | Attempted theft | Policy firewall; tool output wrapped as `<untrusted>`; new recipients are T2; amounts capped | A human could approve a bad T2 if they don't read the card |
 | R3 | Human approval fatigue | Medium | Bad T2 approved | Plain-English reasons, small auto limits so T2 is rare | Social engineering of the human |
 | R4 | Audit log deleted entirely | Low | Daily budget resets | Hash chain detects edits, not full deletion | Stretch: anchor the head hash on-chain periodically |
 | R5 | Malicious RPC returns false simulation | Low | Wasted gas or misleading preview | Receipt status checked; use a reputable RPC | Not fully mitigated |
@@ -60,3 +60,6 @@ Evaluation order: kill switch → chain → rate limit → swap rules (venue →
 | R8 | Allowlisted address itself is compromised | Low | Funds to attacker | Daily budget bounds loss | Not detectable by us |
 | R9 | Dependency supply-chain attack (npm) | Low | Key exfiltration | Lockfile, few dependencies, `npm audit` | Inherent |
 | R10 | Uniswap v3 liquidity on Base Sepolia is thin or absent, so a swap reverts or quotes to zero | Medium | Swap demo fails, wasted gas | The engine refuses a swap with no valid quote; pool fee tier configured in policy; swap is droppable in favour of the core (task + security) | Swaps may be unavailable on this testnet |
+| R11 | Address-poisoning detection is a heuristic (matching leading/trailing hex digits), so a carefully crafted near-miss could evade it | Low | Funds to a lookalike | New (non-allowlisted) recipients are still T2, so a human sees the full address before approving | Social engineering of the human remains |
+| R12 | The anomaly guard uses the same price source as the portfolio; a missing or manipulated price disables or skews it | Low | A large request slips the guard | Hard caps and daily budgets always apply; prices are labelled (`chainlink`/`fixed-testnet-table`) and the guard is off only when a price is genuinely missing | On mainnet, oracle manipulation is a real residual |
+| R13 | The local block list is static and cannot know a brand-new scam address | Medium | Interaction with a fresh scam | New recipients are T2; block list + denylist raise known-bad addresses to T3 immediately | Inherent to any local list |
