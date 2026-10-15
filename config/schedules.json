@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "weekly-usdc-to-alice",
+      "enabled": false,
+      "trigger": { "kind": "weekly", "weekday": 5, "atTimeUtc": "09:00" },
+      "action": {
+        "kind": "erc20_transfer",
+        "token": "USDC",
+        "to": "0x4785Dca37A242F3D80f844CB0b143A687008a2B5",
+        "amount": "1"
+      }
+    },
+    {
+      "id": "eth-drop-5-to-usdc",
+      "enabled": false,
+      "trigger": { "kind": "price-drop", "asset": "ETH", "dropPct": "5", "baselineUsd": "2500" },
+      "action": {
+        "kind": "swap",
+        "tokenIn": "WETH",
+        "tokenOut": "USDC",
+        "amountPct": "50",
+        "slippageBps": 50
+      }
+    }
+  ]
+}
