@@ -17,12 +17,12 @@ _Submission item 5: permission-tier implementation and known-risk list. Keep thi
 
 | Tier | Rule (see `src/policy/engine.ts`) | Test |
 |---|---|---|
-| T0 Read-only | Read tools never reach the executor | `test/tools.test.ts` |
-| T1 Auto | Allowlisted recipient, amount ≤ `autoMaxPerTx`, within `dailyBudget`; bounded approval to allowlisted spender | `policy.test.ts` "T1 auto" |
-| T2 Confirm | New recipient, or amount > `autoMaxPerTx`; human types "yes" after seeing reasons; policy re-checked after approval | `policy.test.ts` "T2 confirm" |
-| T3 Deny | Paused, wrong chain, rate limit, unknown token, zero/malformed amount, denylisted, > `hardMaxPerTx`, over `dailyBudget`, unlimited approval, non-allowlisted spender | `policy.test.ts` risk controls |
+| T0 Read-only | Read tools (balances, portfolio, swap quote, policy, history) never reach the executor | `test/tools.test.ts`, `test/portfolio.test.ts`, `test/swap.test.ts` |
+| T1 Auto | Allowlisted recipient, amount ≤ `autoMaxPerTx`, within `dailyBudget`; bounded approval to allowlisted spender; bounded swap within `autoMaxSlippageBps` and `autoMaxPerTx` | `policy.test.ts` "T1 auto", "swaps" |
+| T2 Confirm | New recipient, or amount > `autoMaxPerTx`; swap slippage above `autoMaxSlippageBps`; human types "yes" after seeing reasons; policy re-checked after approval | `policy.test.ts` "T2 confirm", "swaps" |
+| T3 Deny | Paused, wrong chain, rate limit, unknown token, zero/malformed amount, denylisted, > `hardMaxPerTx`, over `dailyBudget`, unlimited approval, non-allowlisted spender; swap to an unknown/ non-allowlisted router, slippage above `maxSlippageBps`, no market quote, same token in/out | `policy.test.ts` risk controls + "swaps" |
 
-Evaluation order: kill switch → chain → rate limit → asset → amount → denylist → approval rules → hard cap → daily budget → recipient/auto-limit → tier.
+Evaluation order: kill switch → chain → rate limit → swap rules (venue → spender allowlist → slippage → token/amount → quote) or asset → amount → denylist → approval rules → hard cap → daily budget → recipient/auto-limit → tier.
 
 ## 3. Controls
 
@@ -38,6 +38,9 @@ Evaluation order: kill switch → chain → rate limit → asset → amount → 
 | Mainnet refused unless explicitly enabled | ✅ |
 | Key never printed; `.env` chmod 600 and git-ignored | ✅ |
 | Unlimited ERC-20 approvals forbidden | ✅ |
+| Swaps priced by the DEX quoter; the engine derives the on-chain minimum output and caps slippage; only the allowlisted router is called | ✅ |
+| Swap approvals are bounded to exactly `amountIn`, never unlimited, and go through the engine themselves | ✅ |
+| Scheduled rules are user config (no LLM write path); each run becomes a normal intent through the executor | ✅ |
 | Prompt-injection defence (untrusted-data wrapping + test) | ⏳ Day 3 |
 | Address-poisoning / lookalike detection | ⏳ Day 3 |
 | Contract-recipient and risk-list checks | ⏳ Day 3 |
@@ -56,3 +59,4 @@ Evaluation order: kill switch → chain → rate limit → asset → amount → 
 | R7 | LLM misreads amounts/units | Medium | Wrong amount | Human-readable decimals only, zod regex, preview tool, hard caps | Bounded by caps |
 | R8 | Allowlisted address itself is compromised | Low | Funds to attacker | Daily budget bounds loss | Not detectable by us |
 | R9 | Dependency supply-chain attack (npm) | Low | Key exfiltration | Lockfile, few dependencies, `npm audit` | Inherent |
+| R10 | Uniswap v3 liquidity on Base Sepolia is thin or absent, so a swap reverts or quotes to zero | Medium | Swap demo fails, wasted gas | The engine refuses a swap with no valid quote; pool fee tier configured in policy; swap is droppable in favour of the core (task + security) | Swaps may be unavailable on this testnet |
