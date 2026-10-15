@@ -4,7 +4,7 @@ description: Use when building, extending, testing or preparing the submission f
 license: MIT
 compatibility: opencode
 metadata:
-  audience: muse-spark
+  audience: deepseek-v4-1-flash
   project: agent-wallet
   opencode/slash: "true"
 ---
