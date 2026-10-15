@@ -1,0 +1,33 @@
+{
+  "name": "agent-wallet",
+  "version": "0.1.0",
+  "description": "Autonomous on-chain AI wallet agent with a deterministic policy firewall, tiered permissions and a tamper-evident audit log.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "agent": "tsx src/index.ts chat",
+    "cli": "tsx src/index.ts",
+    "keygen": "tsx scripts/keygen.ts",
+    "evidence": "tsx scripts/evidence.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.7",
+    "openai": "^7.32.0",
+    "viem": "^2.57.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

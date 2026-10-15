@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# secrets — never commit keys (use .env.example as the template)
+.env
+.env.*
+!.env.example
+
+# runtime state (local only, regenerated per machine)
+data/*.jsonl
+data/PAUSED
+
+# build output
+dist/
+
+# test coverage
+coverage/
+
+# logs
+*.log
+
+# OS files
+.DS_Store
