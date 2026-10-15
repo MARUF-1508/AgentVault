@@ -1,4 +1,4 @@
-import { formatUnits, type PublicClient } from 'viem';
+import { formatUnits, parseUnits, type PublicClient } from 'viem';
 import type { Policy } from '../policy/types.js';
 
 /** Chainlink AggregatorV3, read-only. */
@@ -20,6 +20,22 @@ const AGGREGATOR_V3_ABI = [
 ] as const;
 
 export type PriceSource = 'chainlink' | 'fixed-testnet-table';
+
+/** Fixed-point scale used for all USD values (bigint base units). */
+export const USD_SCALE = 8;
+
+/**
+ * Value `balanceBase` (units of 10^decimals) at `usdPrice` as a bigint in USD
+ * base units (10^USD_SCALE). Returns undefined when either input is unusable.
+ */
+export function usdValueBase(balanceBase: bigint, decimals: number, usdPrice: string): bigint | undefined {
+  try {
+    const priceScaled = parseUnits(usdPrice, USD_SCALE);
+    return (balanceBase * priceScaled) / 10n ** BigInt(decimals);
+  } catch {
+    return undefined;
+  }
+}
 
 export interface PriceQuote {
   asset: string;

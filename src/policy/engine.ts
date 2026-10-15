@@ -53,6 +53,19 @@ export function evaluate(
     return deny(symbol, amountBase, `${target} is on the denylist.`);
   }
 
+  // Day 3 address risk. Findings from the risk module can only raise the tier.
+  const recipient = state.risk?.recipient;
+  if (recipient?.onBlocklist) {
+    return deny(symbol, amountBase, `${target} is on the local block list.`);
+  }
+  if (recipient?.lookalikeOf) {
+    return deny(
+      symbol,
+      amountBase,
+      `${target} closely resembles allowlisted ${recipient.lookalikeOf} (possible address poisoning).`,
+    );
+  }
+
   if (intent.kind === 'erc20_approve') {
     if (unlimited && !policy.approvals.allowUnlimited) {
       return deny(symbol, amountBase, 'Unlimited token approvals are forbidden by policy.');
@@ -86,6 +99,19 @@ export function evaluate(
   const known = Object.values(policy.recipients.allowlist).includes(target);
   if (!known) reasons.push(`${target} is a new recipient (not on the allowlist).`);
   if (amountBase > autoMax) reasons.push(`${fmt(amountBase)} is above the auto limit of ${fmt(autoMax)}.`);
+
+  // Day 3: a non-allowlisted recipient that is a contract is at best a confirmation.
+  if (!known && recipient?.isContract) {
+    const mode = policy.risk?.contractRecipients ?? 'confirm';
+    if (mode === 'deny') {
+      return deny(symbol, amountBase, `${target} is a contract and policy denies contract recipients.`);
+    }
+    if (mode === 'confirm') reasons.push(`${target} is a contract (it has code), not an ordinary wallet.`);
+  }
+
+  // Day 3: refuse a single request that would move too much of the whole portfolio.
+  const anomaly = anomalyReason(state, policy);
+  if (anomaly) return deny(symbol, amountBase, anomaly);
 
   if (reasons.length > 0) return { tier: 'T2_CONFIRM', reasons, amountBase, asset: symbol };
   return {
@@ -154,6 +180,10 @@ function evaluateSwap(
     return deny(tokenIn.symbol, amountBase, `Daily budget exceeded: ${fmtIn(spent)} already spent today, budget is ${fmtIn(inBudget)}.`);
   }
 
+  // Day 3: a swap also moves value; apply the portfolio anomaly guard.
+  const anomaly = anomalyReason(state, policy);
+  if (anomaly) return deny(tokenIn.symbol, amountBase, anomaly);
+
   if (!market || market.amountOut <= 0n) {
     return deny(tokenIn.symbol, amountBase, 'No valid market quote is available for this swap.');
   }
@@ -199,6 +229,42 @@ function resolveAsset(intent: Exclude<Intent, { kind: 'swap' }>, policy: Policy)
   if (!key) return undefined;
   const t = policy.tokens[key]!;
   return { symbol: key, decimals: t.decimals, limits: t, address: t.address };
+}
+
+/**
+ * The asset an intent spends, for USD valuation and risk checks. For a swap this
+ * is the input token. Undefined when the token is not in the policy.
+ */
+export function intentAsset(intent: Intent, policy: Policy): { symbol: string; decimals: number } | undefined {
+  if (intent.kind === 'swap') {
+    const t = tokenInfo(policy, intent.tokenIn);
+    return t ? { symbol: t.symbol, decimals: t.decimals } : undefined;
+  }
+  const a = resolveAsset(intent, policy);
+  return a ? { symbol: a.symbol, decimals: a.decimals } : undefined;
+}
+
+/** The human-readable amount string an intent carries. */
+export function intentAmount(intent: Intent): string {
+  return intent.kind === 'swap' ? intent.amountIn : (intent.amount as string);
+}
+
+/**
+ * Portfolio anomaly guard: deny when this single request is worth more than the
+ * configured share of the whole portfolio. Pure: the USD values are chain-derived
+ * inputs passed in via `SpendState.risk`. Disabled when the cap is 0 or unknown.
+ */
+function anomalyReason(state: SpendState, policy: Policy): string | undefined {
+  const maxPct = policy.risk?.maxActionPctOfPortfolio ?? 0;
+  if (maxPct <= 0) return undefined;
+  const portfolioUsd = state.risk?.portfolioUsd;
+  const amountUsd = state.risk?.amountUsd;
+  if (portfolioUsd === undefined || portfolioUsd <= 0n) return undefined;
+  if (amountUsd === undefined || amountUsd <= 0n) return undefined;
+  if (amountUsd * 100n > portfolioUsd * BigInt(maxPct)) {
+    return `Anomaly guard: one request worth ~$${formatUnits(amountUsd, 8)} is more than ${maxPct}% of the ~$${formatUnits(portfolioUsd, 8)} portfolio.`;
+  }
+  return undefined;
 }
 
 export function tokenInfo(policy: Policy, symbol: string) {

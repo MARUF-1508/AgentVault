@@ -178,3 +178,85 @@ describe('policy engine: swaps', () => {
     expect(evaluate(swap(), noSwap, fresh(), CHAIN, quote).tier).toBe('T3_DENY');
   });
 });
+
+describe('policy engine: Day 3 risk controls', () => {
+  const LOOKALIKE = `0x1111${'a'.repeat(32)}1111` as `0x${string}`;
+  const riskPolicy = PolicySchema.parse({
+    ...policy,
+    risk: {
+      maxActionPctOfPortfolio: 50,
+      contractRecipients: 'confirm',
+      blocklist: [DEAD],
+      lookalike: { enabled: true, prefix: 4, suffix: 4 },
+    },
+  });
+  const quote = { amountOut: parseUnits('0.0002', 18) };
+  const withRisk = (risk: NonNullable<SpendState['risk']>) => ({ ...fresh(), risk });
+
+  it('T3 deny: recipient on the local block list', () => {
+    const state = withRisk({ recipient: { isContract: false, onBlocklist: true } });
+    const d = evaluate({ kind: 'native_transfer', to: STRANGER, amount: '0.0005' }, riskPolicy, state, CHAIN);
+    expect(d.tier).toBe('T3_DENY');
+    expect(d.reasons.join()).toMatch(/block list/i);
+  });
+
+  it('T3 deny: recipient looks like an allowlisted address (poisoning)', () => {
+    const state = withRisk({ recipient: { isContract: false, onBlocklist: false, lookalikeOf: FRIEND } });
+    const d = evaluate({ kind: 'native_transfer', to: LOOKALIKE, amount: '0.0005' }, riskPolicy, state, CHAIN);
+    expect(d.tier).toBe('T3_DENY');
+    expect(d.reasons.join()).toMatch(/poisoning/i);
+  });
+
+  it('T3 deny: a new contract recipient when policy denies contracts', () => {
+    const denyContracts = PolicySchema.parse({
+      ...riskPolicy,
+      risk: { ...riskPolicy.risk, contractRecipients: 'deny' },
+    });
+    const state = withRisk({ recipient: { isContract: true, onBlocklist: false } });
+    const d = evaluate({ kind: 'native_transfer', to: STRANGER, amount: '0.0005' }, denyContracts, state, CHAIN);
+    expect(d.tier).toBe('T3_DENY');
+  });
+
+  it('T2 confirm with a contract reason for a new contract recipient', () => {
+    const state = withRisk({ recipient: { isContract: true, onBlocklist: false } });
+    const d = evaluate({ kind: 'native_transfer', to: STRANGER, amount: '0.0005' }, riskPolicy, state, CHAIN);
+    expect(d.tier).toBe('T2_CONFIRM');
+    expect(d.reasons.join()).toMatch(/contract/i);
+  });
+
+  it('does not penalise an allowlisted contract recipient', () => {
+    const state = withRisk({ recipient: { isContract: true, onBlocklist: false } });
+    const d = evaluate({ kind: 'native_transfer', to: FRIEND, amount: '0.0005' }, riskPolicy, state, CHAIN);
+    expect(d.tier).toBe('T1_AUTO');
+  });
+
+  it('T3 deny: a single request worth more than the portfolio share', () => {
+    const state = withRisk({ portfolioUsd: parseUnits('100', 8), amountUsd: parseUnits('60', 8) });
+    const d = evaluate({ kind: 'native_transfer', to: FRIEND, amount: '0.0005' }, riskPolicy, state, CHAIN);
+    expect(d.tier).toBe('T3_DENY');
+    expect(d.reasons.join()).toMatch(/Anomaly guard/);
+  });
+
+  it('allows a request below the portfolio share', () => {
+    const state = withRisk({ portfolioUsd: parseUnits('100', 8), amountUsd: parseUnits('40', 8) });
+    const d = evaluate({ kind: 'native_transfer', to: FRIEND, amount: '0.0005' }, riskPolicy, state, CHAIN);
+    expect(d.tier).toBe('T1_AUTO');
+  });
+
+  it('applies the anomaly guard to swaps too', () => {
+    const state = withRisk({ portfolioUsd: parseUnits('100', 8), amountUsd: parseUnits('60', 8) });
+    const swap = { kind: 'swap', tokenIn: 'USDC', tokenOut: 'WETH', amountIn: '0.5', slippageBps: 50 } as Extract<
+      Intent,
+      { kind: 'swap' }
+    >;
+    const d = evaluate(swap, riskPolicy, state, CHAIN, quote);
+    expect(d.tier).toBe('T3_DENY');
+    expect(d.reasons.join()).toMatch(/Anomaly guard/);
+  });
+
+  it('leaves the anomaly guard off when the cap is unset (0)', () => {
+    const state = withRisk({ portfolioUsd: parseUnits('100', 8), amountUsd: parseUnits('99', 8) });
+    const d = evaluate({ kind: 'native_transfer', to: FRIEND, amount: '0.0005' }, policy, state, CHAIN);
+    expect(d.tier).toBe('T1_AUTO');
+  });
+});

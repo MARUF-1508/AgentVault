@@ -42,6 +42,29 @@ const PriceRules = z.object({
   fallbackUsd: Decimal,
 });
 
+/**
+ * Day 3 risk controls. Opt-in: an absent block disables the anomaly guard and
+ * treats non-allowlisted contract recipients as "confirm" (T2).
+ */
+const RiskRules = z.object({
+  /** Refuse a single action worth more than this share (0-100) of the portfolio. 0 disables. */
+  maxActionPctOfPortfolio: z.number().min(0).max(100).default(50),
+  /** What to do with a non-allowlisted recipient that has contract code. */
+  contractRecipients: z.enum(['allow', 'confirm', 'deny']).default('confirm'),
+  /** Local block list of known-bad addresses (scams, exploiters). */
+  blocklist: z.array(Address).default([]),
+  /** Detect an address that imitates an allowlisted one (address poisoning). */
+  lookalike: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Shared leading hex digits required to flag a lookalike. */
+      prefix: z.number().int().min(0).max(20).default(4),
+      /** Shared trailing hex digits required to flag a lookalike. */
+      suffix: z.number().int().min(0).max(20).default(4),
+    })
+    .default({ enabled: true, prefix: 4, suffix: 4 }),
+});
+
 export const PolicySchema = z.object({
   version: z.literal(1),
   chainId: z.number().int().positive(),
@@ -61,6 +84,8 @@ export const PolicySchema = z.object({
   swap: SwapRules.optional(),
   /** Optional: per-symbol USD valuation for the portfolio view. */
   prices: z.record(z.string(), PriceRules).default({}),
+  /** Optional Day 3 risk controls (anomaly guard, block list, lookalikes, contracts). */
+  risk: RiskRules.optional(),
   rateLimit: z.object({ maxTxPerHour: z.number().int().positive() }),
 });
 
@@ -149,4 +174,32 @@ export interface SpendState {
   spentToday: Record<string, bigint>;
   txLastHour: number;
   paused: boolean;
+  /** Optional Day 3 risk findings; missing means those checks stay off. */
+  risk?: RiskInput;
+}
+
+/**
+ * Address-risk findings for one target. Computed by `src/risk/address.ts` (which
+ * may read chain state) and passed in, so the engine remains a pure function
+ * while still being able to *raise* a tier.
+ */
+export interface AddressRisk {
+  /** True when the address has contract code, or we could not prove otherwise. */
+  isContract: boolean;
+  /** True when the address is on the policy's local block list. */
+  onBlocklist: boolean;
+  /** An allowlisted address this one imitates (address poisoning), if any. */
+  lookalikeOf?: `0x${string}`;
+}
+
+/**
+ * Chain-derived inputs for the risk checks. The executor computes these before
+ * calling `evaluate`; a missing field simply leaves that check off.
+ */
+export interface RiskInput {
+  recipient?: AddressRisk;
+  /** Whole-portfolio value in USD, 8 decimal places. */
+  portfolioUsd?: bigint;
+  /** USD value of this request's amount, 8 decimal places. */
+  amountUsd?: bigint;
 }

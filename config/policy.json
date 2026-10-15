@@ -47,6 +47,12 @@
     "WETH": { "fallbackUsd": "2500" },
     "USDC": { "fallbackUsd": "1" }
   },
+  "risk": {
+    "maxActionPctOfPortfolio": 50,
+    "contractRecipients": "confirm",
+    "blocklist": ["0x000000000000000000000000000000000000dEaD"],
+    "lookalike": { "enabled": true, "prefix": 4, "suffix": 4 }
+  },
   "rateLimit": {
     "maxTxPerHour": 10
   }

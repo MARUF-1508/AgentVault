@@ -1,9 +1,7 @@
 import { erc20Abi, formatEther, formatUnits, parseUnits, type Address } from 'viem';
 import type { Clients } from '../chain/client.js';
 import type { Policy } from '../policy/types.js';
-import { getUsdPrice, type PriceSource } from '../prices/price.js';
-
-const USD_SCALE = 8;
+import { getUsdPrice, usdValueBase, USD_SCALE, type PriceSource } from '../prices/price.js';
 
 export interface Holding {
   asset: string;
@@ -27,12 +25,8 @@ export interface Portfolio {
 
 /** USD value of `balanceBase` (units of 10^decimals) at `usdPrice`, or undefined if the price is unusable. */
 function usdValue(balanceBase: bigint, decimals: number, usdPrice: string): string | undefined {
-  try {
-    const priceScaled = parseUnits(usdPrice, USD_SCALE);
-    return formatUnits((balanceBase * priceScaled) / 10n ** BigInt(decimals), USD_SCALE);
-  } catch {
-    return undefined;
-  }
+  const v = usdValueBase(balanceBase, decimals, usdPrice);
+  return v === undefined ? undefined : formatUnits(v, USD_SCALE);
 }
 
 /**

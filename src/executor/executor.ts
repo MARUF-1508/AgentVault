@@ -3,9 +3,12 @@ import type { Approver } from '../approval/approver.js';
 import type { AuditLog } from '../audit/log.js';
 import { explorerTx, type Clients } from '../chain/client.js';
 import { encodeSwapCalldata, quoteExactInputSingle } from '../dex/uniswap.js';
-import { evaluate, tokenInfo } from '../policy/engine.js';
+import { evaluate, intentAmount, intentAsset, tokenInfo } from '../policy/engine.js';
 import { spendStateFrom } from '../policy/state.js';
-import type { Decision, Intent, Policy, SwapMarket } from '../policy/types.js';
+import type { Decision, Intent, Policy, RiskInput, SwapMarket } from '../policy/types.js';
+import { getPortfolio } from '../portfolio/portfolio.js';
+import { usdValueBase, USD_SCALE } from '../prices/price.js';
+import { checkAddress } from '../risk/address.js';
 
 export interface ExecutionResult {
   status: 'executed' | 'denied' | 'rejected_by_human' | 'simulation_failed' | 'reverted' | 'dry_run';
@@ -38,7 +41,46 @@ export class Executor {
   async preview(intent: Intent): Promise<Decision> {
     const state = spendStateFrom(this.audit.read(), this.pauseFile);
     const market = await this.marketFor(intent);
-    return evaluate(intent, this.policy, state, this.clients.chain.id, market);
+    const risk = await this.riskFor(intent);
+    return evaluate(intent, this.policy, risk ? { ...state, risk } : state, this.clients.chain.id, market);
+  }
+
+  /**
+   * Chain-derived risk input for the pure engine (Day 3): recipient intel plus,
+   * when the anomaly guard is on, the portfolio value and this request's USD
+   * value. Missing fields leave the corresponding check off.
+   */
+  private async riskFor(intent: Intent): Promise<RiskInput | undefined> {
+    const risk: RiskInput = {};
+
+    const target = this.recipientOf(intent);
+    if (target) risk.recipient = await checkAddress(this.clients.publicClient, this.policy, target);
+
+    const maxPct = this.policy.risk?.maxActionPctOfPortfolio ?? 0;
+    if (maxPct > 0 && this.clients.account) {
+      const portfolio = await getPortfolio(this.clients, this.policy);
+      const total = tryParseUnits(portfolio.totalUsd, USD_SCALE);
+      if (total !== undefined && total > 0n) {
+        risk.portfolioUsd = total;
+        const asset = intentAsset(intent, this.policy);
+        const holding = asset
+          ? portfolio.holdings.find((h) => h.asset.toLowerCase() === asset.symbol.toLowerCase())
+          : undefined;
+        const amount = asset ? tryParseUnits(intentAmount(intent), asset.decimals) : undefined;
+        if (amount !== undefined && holding?.usdPrice) {
+          risk.amountUsd = usdValueBase(amount, asset!.decimals, holding.usdPrice);
+        }
+      }
+    }
+
+    return Object.keys(risk).length > 0 ? risk : undefined;
+  }
+
+  /** The address a transfer/approval commits to, when there is one. */
+  private recipientOf(intent: Intent): `0x${string}` | undefined {
+    if (intent.kind === 'native_transfer' || intent.kind === 'erc20_transfer') return intent.to;
+    if (intent.kind === 'erc20_approve') return intent.spender;
+    return undefined;
   }
 
   /**
@@ -208,5 +250,14 @@ export class Executor {
 function shortError(err: unknown): string {
   const e = err as { shortMessage?: string; message?: string };
   return e.shortMessage ?? e.message ?? String(err);
+}
+
+/** parseUnits, but undefined instead of throwing (risk inputs are best-effort). */
+function tryParseUnits(value: string, decimals: number): bigint | undefined {
+  try {
+    return parseUnits(value, decimals);
+  } catch {
+    return undefined;
+  }
 }
 
