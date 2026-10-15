@@ -151,10 +151,25 @@ export interface ToolContext {
 export async function runTool(name: string, rawArgs: string, ctx: ToolContext): Promise<unknown> {
   let args: Record<string, unknown>;
   try {
-    args = rawArgs ? JSON.parse(rawArgs) : {};
+    const parsed: unknown = rawArgs ? JSON.parse(rawArgs) : {};
+    // The model's arguments are untrusted: only a plain JSON object is meaningful.
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { error: 'Arguments must be a JSON object.' };
+    }
+    args = parsed as Record<string, unknown>;
   } catch {
     return { error: 'Arguments were not valid JSON.' };
   }
+  try {
+    return await dispatchTool(name, args, ctx);
+  } catch (err) {
+    // A failing read or integration must reach the model as data, never crash the turn.
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Validated tool dispatch, split out so an unexpected failure is returned, not thrown. */
+async function dispatchTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<unknown> {
   const { publicClient, account, chain } = ctx.clients;
 
   switch (name) {
@@ -167,7 +182,7 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolContext): 
       return getPortfolio(ctx.clients, ctx.policy);
     case 'get_token_balance': {
       const t = tokenInfo(ctx.policy, String(args.token ?? ''));
-      if (!t) return { error: `Token ${args.token} is not in the policy.` };
+      if (!t) return { error: `Token ${args.token ?? '(none)'} is not in the policy.` };
       if (!account) return { error: 'No wallet key configured.' };
       const bal = await publicClient.readContract({ address: t.address, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] });
       return { token: t.symbol, balance: formatUnits(bal, t.decimals) };
@@ -189,7 +204,7 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolContext): 
     case 'execute_swap':
       return executeSwap(args, ctx);
     case 'get_recent_activity': {
-      const limit = Math.min(Math.max(Number(args.limit ?? 10), 1), 50);
+      const limit = clampLimit(args.limit);
       return ctx.audit.read().slice(-limit).map(({ seq, ts, type, data }) => ({ seq, ts, type, data }));
     }
     case 'list_schedules':
@@ -203,6 +218,13 @@ function executionSummary(r: Awaited<ReturnType<Executor['execute']>>) {
   return { status: r.status, tier: r.decision.tier, reasons: r.decision.reasons, txHash: r.txHash, explorerUrl: r.explorerUrl, error: r.error };
 }
 
+/** A safe page size from untrusted model input: an integer in [1, max], else the default. */
+function clampLimit(value: unknown, def = 10, max = 50): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(Math.max(Math.trunc(n), 1), max);
+}
+
 async function swapQuote(args: Record<string, unknown>, ctx: ToolContext) {
   const swap = ctx.policy.swap;
   if (!swap) return { error: 'Swaps are not enabled in the policy.' };
@@ -210,7 +232,11 @@ async function swapQuote(args: Record<string, unknown>, ctx: ToolContext) {
   const tokenOut = tokenInfo(ctx.policy, String(args.tokenOut ?? ''));
   if (!tokenIn || !tokenOut) return { error: 'tokenIn or tokenOut is not in the policy.' };
   const amountIn = String(args.amountIn ?? '');
-  const slippageBps = args.slippageBps === undefined ? swap.autoMaxSlippageBps : Number(args.slippageBps);
+  // Informational only, but never show a minimum past the policy's hard slippage cap.
+  const requested = args.slippageBps === undefined ? swap.autoMaxSlippageBps : Number(args.slippageBps);
+  const slippageBps = Number.isFinite(requested)
+    ? Math.min(Math.max(Math.trunc(requested), 0), swap.maxSlippageBps)
+    : swap.autoMaxSlippageBps;
   try {
     const amountOut = await quoteExactInputSingle(ctx.clients.publicClient, swap.quoter, {
       tokenIn: tokenIn.address,

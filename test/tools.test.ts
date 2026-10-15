@@ -40,3 +40,44 @@ describe('tool argument validation', () => {
     expect(r).toMatchObject({ error: 'Invalid transaction' });
   });
 });
+
+describe('tool robustness', () => {
+  // 60 audit entries so the 50-item cap is observable.
+  const entries = Array.from({ length: 60 }, (_, i) => ({ seq: i, ts: 't', type: 'intent', data: { i } }));
+  const robustCtx = { ...ctx, audit: { read: () => entries } } as unknown as ToolContext;
+
+  it('rejects non-object arguments (null, array, scalar) instead of throwing', async () => {
+    for (const raw of ['null', '[]', '5', '"hi"', 'true']) {
+      expect(await runTool('execute_transaction', raw, ctx)).toMatchObject({ error: expect.any(String) });
+    }
+  });
+
+  it('caps get_recent_activity at 50 entries', async () => {
+    const r = (await runTool('get_recent_activity', JSON.stringify({ limit: 9999 }), robustCtx)) as unknown[];
+    expect(r).toHaveLength(50);
+  });
+
+  it('sanitises a non-numeric limit rather than returning the whole log', async () => {
+    const r = (await runTool('get_recent_activity', JSON.stringify({ limit: 'abc' }), robustCtx)) as unknown[];
+    expect(r).toHaveLength(10); // falls back to the default page size, not 60
+  });
+
+  it('clamps a negative or zero limit to at least one entry', async () => {
+    for (const limit of [-5, 0]) {
+      const r = (await runTool('get_recent_activity', JSON.stringify({ limit }), robustCtx)) as unknown[];
+      expect(r).toHaveLength(1);
+    }
+  });
+
+  it('returns an error object (not a throw) when a chain read fails', async () => {
+    const failing = {
+      ...ctx,
+      clients: {
+        publicClient: { getBalance: async () => { throw new Error('rpc down'); } },
+        account: { address: '0x4785Dca37A242F3D80f844CB0b143A687008a2B5' },
+        chain: { id: 84532, name: 'Base Sepolia' },
+      },
+    } as unknown as ToolContext;
+    await expect(runTool('get_wallet_info', '{}', failing)).resolves.toMatchObject({ error: expect.stringMatching(/rpc down/) });
+  });
+});

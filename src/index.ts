@@ -98,6 +98,7 @@ async function main() {
       return chat(env, ctx);
     default:
       console.log(USAGE);
+      process.exitCode = 1;
   }
 }
 

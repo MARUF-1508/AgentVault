@@ -30,6 +30,7 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 |---|---|
 | Deterministic policy firewall outside the LLM | ✅ |
 | Zod validation of every tool argument | ✅ |
+| Tool dispatch is contained: non-object/malformed arguments are rejected and any integration error is returned to the model as data, never thrown into the agent loop | ✅ |
 | Simulation (eth_call + estimateGas) before approval and signing | ✅ |
 | Re-check policy after human approval (TOCTOU) | ✅ |
 | Hash-chained tamper-evident audit log | ✅ |

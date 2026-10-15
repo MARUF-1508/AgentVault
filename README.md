@@ -30,7 +30,7 @@ you ─▶ LLM agent ─▶ tool (zod-validated) ─▶ policy engine ─▶ sim
 git clone <your-repo-url> agent-wallet
 cd agent-wallet
 npm install
-npm test            # 75 tests, no network needed
+npm test            # 84 tests, no network needed
 ```
 
 ### 2. Create the agent's testnet wallet
@@ -112,6 +112,7 @@ src/
   prices/price.ts       USD valuation: Chainlink feed, else labelled testnet table
   portfolio/portfolio.ts T0 read-only balances + USD total
   risk/address.ts       contract-code, block-list and address-poisoning checks
+  report/evidence.ts    renders docs/EXECUTION_EVIDENCE.md from the audit log
   schedule/rules.ts     scheduled / conditional rule schema + due calculation
   schedule/runner.ts    runs due rules through the executor
 contracts/AgentVault.sol  on-chain spending limits (challenge bonus)
