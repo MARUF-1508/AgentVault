@@ -42,6 +42,11 @@
     "maxSlippageBps": 100,
     "autoMaxSlippageBps": 50
   },
+  "prices": {
+    "ETH": { "fallbackUsd": "2500" },
+    "WETH": { "fallbackUsd": "2500" },
+    "USDC": { "fallbackUsd": "1" }
+  },
   "rateLimit": {
     "maxTxPerHour": 10
   }
