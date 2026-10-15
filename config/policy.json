@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "chainId": 84532,
+  "native": {
+    "symbol": "ETH",
+    "autoMaxPerTx": "0.0005",
+    "hardMaxPerTx": "0.005",
+    "dailyBudget": "0.01"
+  },
+  "tokens": {
+    "USDC": {
+      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "decimals": 6,
+      "autoMaxPerTx": "1",
+      "hardMaxPerTx": "10",
+      "dailyBudget": "25"
+    }
+  },
+  "recipients": {
+    "allowlist": {
+      "alice": "0x4785Dca37A242F3D80f844CB0b143A687008a2B5"
+    },
+    "denylist": ["0x000000000000000000000000000000000000dEaD"]
+  },
+  "approvals": {
+    "allowUnlimited": false,
+    "spenderAllowlist": {}
+  },
+  "rateLimit": {
+    "maxTxPerHour": 10
+  }
+}
