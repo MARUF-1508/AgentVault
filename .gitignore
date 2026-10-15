@@ -13,6 +13,12 @@ data/PAUSED
 # build output
 dist/
 
+# foundry (out/, cache/, broadcast/); forge-std is installed into lib/ by `forge install`
+out/
+cache/
+lib/
+broadcast/
+
 # test coverage
 coverage/
 
