@@ -34,4 +34,9 @@ describe('tool argument validation', () => {
   it('rejects unknown tools', async () => {
     expect(await runTool('drain_wallet', '{}', ctx)).toMatchObject({ error: expect.stringMatching(/Unknown tool/) });
   });
+
+  it('rejects a swap on the generic execute path (must use execute_swap)', async () => {
+    const r = await runTool('execute_transaction', JSON.stringify({ kind: 'swap', tokenIn: 'USDC', tokenOut: 'WETH', amountIn: '1', slippageBps: 50 }), ctx);
+    expect(r).toMatchObject({ error: 'Invalid transaction' });
+  });
 });
