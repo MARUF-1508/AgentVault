@@ -17,6 +17,31 @@ const Limits = z.object({
   dailyBudget: Decimal,
 });
 
+/**
+ * DEX rules for the `swap` intent. Swap is disabled unless this block is present,
+ * so a wallet with no swap config refuses every swap (deny by default).
+ */
+const SwapRules = z.object({
+  /** The only router the agent may call. */
+  router: Address,
+  /** Read-only quoter used to price a swap off-chain (never signs). */
+  quoter: Address,
+  /** Pool fee tier in hundredths of a bip (3000 = 0.30%). */
+  feeTier: z.number().int().positive(),
+  /** Hard ceiling on slippage the agent may ever request, in basis points. */
+  maxSlippageBps: z.number().int().min(1).max(10_000),
+  /** Above this, a swap needs a human. */
+  autoMaxSlippageBps: z.number().int().min(0).max(10_000),
+});
+
+/** How to value an asset in USD. Uses the Chainlink feed when set, else the labelled fallback. */
+const PriceRules = z.object({
+  /** Optional Chainlink AggregatorV3 proxy. Falls back if unset or the read fails. */
+  chainlinkFeed: Address.optional(),
+  /** Clearly-labelled fallback USD price for testnet, as a decimal string. */
+  fallbackUsd: Decimal,
+});
+
 export const PolicySchema = z.object({
   version: z.literal(1),
   chainId: z.number().int().positive(),
@@ -32,6 +57,10 @@ export const PolicySchema = z.object({
     /** label -> address of contracts that may receive ERC-20 allowances. */
     spenderAllowlist: z.record(z.string(), Address),
   }),
+  /** Optional: absent means swaps are refused. */
+  swap: SwapRules.optional(),
+  /** Optional: per-symbol USD valuation for the portfolio view. */
+  prices: z.record(z.string(), PriceRules).default({}),
   rateLimit: z.object({ maxTxPerHour: z.number().int().positive() }),
 });
 
@@ -41,17 +70,46 @@ export type Policy = z.infer<typeof PolicySchema>;
 export type Intent =
   | { kind: 'native_transfer'; to: `0x${string}`; amount: string }
   | { kind: 'erc20_transfer'; token: string; to: `0x${string}`; amount: string }
-  | { kind: 'erc20_approve'; token: string; spender: `0x${string}`; amount: string | 'unlimited' };
+  | { kind: 'erc20_approve'; token: string; spender: `0x${string}`; amount: string | 'unlimited' }
+  | { kind: 'swap'; tokenIn: string; tokenOut: string; amountIn: string; slippageBps: number; router?: `0x${string}` };
 
+const NativeTransferIntent = z.object({ kind: z.literal('native_transfer'), to: Address, amount: Decimal });
+const Erc20TransferIntent = z.object({ kind: z.literal('erc20_transfer'), token: z.string(), to: Address, amount: Decimal });
+const Erc20ApproveIntent = z.object({
+  kind: z.literal('erc20_approve'),
+  token: z.string(),
+  spender: Address,
+  amount: z.union([Decimal, z.literal('unlimited')]),
+});
+const SwapIntent = z.object({
+  kind: z.literal('swap'),
+  tokenIn: z.string(),
+  tokenOut: z.string(),
+  amountIn: Decimal,
+  // Required on purpose: a swap without an explicit slippage cap is refused.
+  slippageBps: z.number().int().min(0).max(10_000),
+  router: Address.optional(),
+});
+
+/**
+ * Transfers and approvals only. This is the schema the generic
+ * preview/execute tools accept, so a model cannot smuggle a swap past the
+ * `execute_swap` orchestration (which sends the bounded approval first).
+ */
+export const ActionIntentSchema = z.discriminatedUnion('kind', [
+  NativeTransferIntent,
+  Erc20TransferIntent,
+  Erc20ApproveIntent,
+]);
+
+export const SwapIntentSchema = SwapIntent;
+
+/** The full union, for the executor, CLI and policy engine. */
 export const IntentSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('native_transfer'), to: Address, amount: Decimal }),
-  z.object({ kind: z.literal('erc20_transfer'), token: z.string(), to: Address, amount: Decimal }),
-  z.object({
-    kind: z.literal('erc20_approve'),
-    token: z.string(),
-    spender: Address,
-    amount: z.union([Decimal, z.literal('unlimited')]),
-  }),
+  NativeTransferIntent,
+  Erc20TransferIntent,
+  Erc20ApproveIntent,
+  SwapIntent,
 ]);
 
 /**
@@ -69,6 +127,20 @@ export interface Decision {
   /** Amount in base units (wei / token units) used for budget accounting. */
   amountBase: bigint;
   asset: string;
+  /** Swaps only: minimum acceptable output, in base units of `tokenOut`. */
+  minAmountOut?: bigint;
+  /** Swaps only: the router that will be called. */
+  router?: `0x${string}`;
+}
+
+/**
+ * Chain-derived market data the engine cannot fetch itself (it must stay pure).
+ * The executor quotes the DEX before `evaluate` and passes it in, the same way it
+ * passes SpendState. A missing/zero quote makes the engine refuse the swap.
+ */
+export interface SwapMarket {
+  /** Quoted output for the swap, in base units of `tokenOut`. */
+  amountOut: bigint;
 }
 
 /** Spend history the engine needs; derived from the audit log. */

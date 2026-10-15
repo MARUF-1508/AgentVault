@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parseEther, parseUnits } from 'viem';
 import { evaluate } from '../src/policy/engine.js';
-import { PolicySchema, type SpendState } from '../src/policy/types.js';
+import { PolicySchema, type Intent, type SpendState } from '../src/policy/types.js';
 
 const FRIEND = '0x1111111111111111111111111111111111111111';
 const STRANGER = '0x2222222222222222222222222222222222222222';
 const DEX = '0x3333333333333333333333333333333333333333';
+const QUOTER = '0x4444444444444444444444444444444444444444';
 const DEAD = '0x000000000000000000000000000000000000dEaD';
 const CHAIN = 84532;
 
@@ -15,9 +16,12 @@ const policy = PolicySchema.parse({
   native: { symbol: 'ETH', autoMaxPerTx: '0.001', hardMaxPerTx: '0.01', dailyBudget: '0.02' },
   tokens: {
     USDC: { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', decimals: 6, autoMaxPerTx: '1', hardMaxPerTx: '10', dailyBudget: '25' },
+    WETH: { address: '0x4200000000000000000000000000000000000006', decimals: 18, autoMaxPerTx: '0.001', hardMaxPerTx: '0.01', dailyBudget: '0.02' },
   },
   recipients: { allowlist: { friend: FRIEND }, denylist: [DEAD] },
   approvals: { allowUnlimited: false, spenderAllowlist: { dex: DEX } },
+  swap: { router: DEX, quoter: QUOTER, feeTier: 3000, maxSlippageBps: 100, autoMaxSlippageBps: 50 },
+  prices: { ETH: { fallbackUsd: '2000' }, WETH: { fallbackUsd: '2000' }, USDC: { fallbackUsd: '1' } },
   rateLimit: { maxTxPerHour: 5 },
 });
 
@@ -107,5 +111,70 @@ describe('policy engine: approvals', () => {
   it('allows a small bounded approval to an allowlisted spender', () => {
     const d = evaluate({ kind: 'erc20_approve', token: 'USDC', spender: DEX, amount: '1' }, policy, fresh(), CHAIN);
     expect(d.tier).toBe('T1_AUTO');
+  });
+});
+
+describe('policy engine: swaps', () => {
+  const quote = { amountOut: parseUnits('0.0002', 18) }; // 0.5 USDC -> 0.0002 WETH
+  const swap = (over: Partial<Extract<Intent, { kind: 'swap' }>> = {}) =>
+    ({ kind: 'swap', tokenIn: 'USDC', tokenOut: 'WETH', amountIn: '0.5', slippageBps: 50, ...over }) as Extract<
+      Intent,
+      { kind: 'swap' }
+    >;
+
+  it('T1 auto: bounded swap to the allowlisted router within auto limits', () => {
+    const d = evaluate(swap(), policy, fresh(), CHAIN, quote);
+    expect(d.tier).toBe('T1_AUTO');
+    expect(d.amountBase).toBe(parseUnits('0.5', 6));
+    expect(d.minAmountOut).toBe((quote.amountOut * 9950n) / 10_000n);
+  });
+
+  it('T2 confirm: slippage above the auto slippage limit but within the cap', () => {
+    const d = evaluate(swap({ slippageBps: 80 }), policy, fresh(), CHAIN, quote);
+    expect(d.tier).toBe('T2_CONFIRM');
+    expect(d.reasons.join()).toMatch(/slippage cap/i);
+  });
+
+  it('T2 confirm: amount above the auto limit', () => {
+    const d = evaluate(swap({ amountIn: '2' }), policy, fresh(), CHAIN, quote);
+    expect(d.tier).toBe('T2_CONFIRM');
+  });
+
+  it('T3 deny: unknown router (malicious venue)', () => {
+    const d = evaluate(swap({ router: STRANGER }), policy, fresh(), CHAIN, quote);
+    expect(d.tier).toBe('T3_DENY');
+    expect(d.reasons.join()).toMatch(/venue/i);
+  });
+
+  it('T3 deny: huge slippage cap (malicious variant)', () => {
+    const d = evaluate(swap({ slippageBps: 150 }), policy, fresh(), CHAIN, quote);
+    expect(d.tier).toBe('T3_DENY');
+    expect(d.reasons.join()).toMatch(/exceeds the maximum/i);
+  });
+
+  it('T3 deny: zero slippage cap (no cap provided)', () => {
+    expect(evaluate(swap({ slippageBps: 0 }), policy, fresh(), CHAIN, quote).tier).toBe('T3_DENY');
+  });
+
+  it('T3 deny: no market quote', () => {
+    const d = evaluate(swap(), policy, fresh(), CHAIN, undefined);
+    expect(d.tier).toBe('T3_DENY');
+    expect(d.reasons.join()).toMatch(/quote/i);
+  });
+
+  it('T3 deny: over the hard cap or the daily budget', () => {
+    expect(evaluate(swap({ amountIn: '50' }), policy, fresh(), CHAIN, quote).tier).toBe('T3_DENY');
+    const spent = { ...fresh(), spentToday: { USDC: parseUnits('24.8', 6) } };
+    expect(evaluate(swap(), policy, spent, CHAIN, quote).tier).toBe('T3_DENY');
+  });
+
+  it('T3 deny: unknown or identical tokens', () => {
+    expect(evaluate(swap({ tokenOut: 'SCAM' }), policy, fresh(), CHAIN, quote).tier).toBe('T3_DENY');
+    expect(evaluate(swap({ tokenOut: 'USDC' }), policy, fresh(), CHAIN, quote).tier).toBe('T3_DENY');
+  });
+
+  it('T3 deny: swaps are refused when the policy has no swap config', () => {
+    const noSwap = PolicySchema.parse({ ...policy, swap: undefined });
+    expect(evaluate(swap(), noSwap, fresh(), CHAIN, quote).tier).toBe('T3_DENY');
   });
 });
