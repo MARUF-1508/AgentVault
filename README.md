@@ -30,7 +30,7 @@ you ─▶ LLM agent ─▶ tool (zod-validated) ─▶ policy engine ─▶ sim
 git clone <your-repo-url> agent-wallet
 cd agent-wallet
 npm install
-npm test            # 24 tests, no network needed
+npm test            # 55 tests, no network needed
 ```
 
 ### 2. Create the agent's testnet wallet
@@ -64,11 +64,16 @@ Edit `config/policy.json`. Add the addresses you trust to `recipients.allowlist`
 
 ```bash
 npm run agent                                      # chat with the agent
+npm run cli -- portfolio                           # all balances with USD value
 npm run cli -- preview <to> 0.0001                 # which tier? nothing is sent
 npm run cli -- send <to> 0.0001 --dry-run          # policy + simulation, nothing sent
 npm run cli -- send <to> 0.0001                    # native ETH
 npm run cli -- send <to> 0.5 USDC                  # ERC-20
 npm run cli -- approve USDC <spender> 1            # bounded ERC-20 approval
+npm run cli -- swap USDC WETH 2 50 --dry-run       # quote + policy, nothing sent (50 bps cap)
+npm run cli -- swap USDC WETH 2 50                 # bounded approve + swap on the DEX
+npm run cli -- schedule list                       # show scheduled / conditional rules
+npm run cli -- schedule run                        # run any due rules (each through the executor)
 npm run cli -- pause                               # kill switch: deny everything
 npm run cli -- resume
 npm run cli -- audit                               # last 20 audit entries
@@ -102,12 +107,24 @@ src/
   approval/approver.ts  human-in-the-loop (CLI now, web later)
   audit/log.ts          hash-chained, append-only JSONL log
   chain/client.ts       viem clients, mainnet guard
+  dex/uniswap.ts        Uniswap v3 quoter + swap calldata (swap intent)
+  prices/price.ts       USD valuation: Chainlink feed, else labelled testnet table
+  portfolio/portfolio.ts T0 read-only balances + USD total
+  schedule/rules.ts     scheduled / conditional rule schema + due calculation
+  schedule/runner.ts    runs due rules through the executor
 contracts/AgentVault.sol  on-chain spending limits (challenge bonus)
-config/policy.json        limits, allowlists
+config/policy.json        limits, allowlists, swap router, prices
+config/schedules.json     scheduled / conditional rules (user config)
 scripts/                  keygen, evidence
 test/                     vitest
 docs/                     plan, security self-assessment, evidence
 ```
+
+### Asset management: swaps and schedules
+
+- **Portfolio** (`get_portfolio` tool / `portfolio` command): every policy asset's balance with a USD value. Prices come from a Chainlink feed when one is configured in `policy.prices`, otherwise a clearly-labelled `fixed-testnet-table`. Read-only (T0).
+- **Swap** (`execute_swap` tool / `swap` command): a `swap` intent priced by the Uniswap v3 QuoterV2. The engine derives the on-chain minimum output from the quote and the slippage cap, refuses anything above `swap.maxSlippageBps`, and only ever calls the allowlisted router. A bounded approval (exactly `amountIn`, never unlimited) is sent first and only if the current allowance is short, and that approval is itself a policy-checked intent.
+- **Scheduled / conditional rules** (`config/schedules.json`): e.g. "send 1 USDC to Alice every Friday" or "move 50% to USDC if ETH drops 5%". Rules are user configuration (there is no LLM tool to write them); `npm run cli -- schedule run` turns each due rule into a normal `Intent` and runs it through the same executor. A rule that already fired today (per the audit log) is skipped. Rules ship disabled — enable them deliberately.
 
 ## Tests
 ```bash
