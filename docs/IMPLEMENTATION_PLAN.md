@@ -112,9 +112,9 @@ Assume a team of 2 to 5. Tracks: **A** = agent/backend, **B** = web UI and demo,
 - [ ] Optional stretch, pick one only if Day 1–4 are done: ERC-4337 smart account with a session key (e.g. permissionless.js + a public bundler on Base Sepolia), **or** an x402-style agent-to-agent payment for an API call.
 
 ### Day 6 (Sun 18 Oct): evidence, docs, freeze
-- [ ] Run the demo script (section 6) end to end on testnet; `npm run evidence`.
-- [ ] C: finish `docs/SECURITY_SELF_ASSESSMENT.md` (tier table, threat model, known-risk list, mitigations, residual risks).
-- [ ] A: `docs/TECHNICAL.md`: architecture diagram, core algorithm (policy evaluation order), security design.
+- [x] Run the demo script (section 6) end to end on testnet; `npm run evidence`.
+- [x] C: finish `docs/SECURITY_SELF_ASSESSMENT.md` (tier table, threat model, known-risk list, mitigations, residual risks).
+- [x] A: `docs/TECHNICAL.md`: architecture diagram, core algorithm (policy evaluation order), security design.
 - [ ] Feature freeze at end of day. Only bug fixes after this.
 
 ### Day 7 (Mon 19 Oct): deck and video
