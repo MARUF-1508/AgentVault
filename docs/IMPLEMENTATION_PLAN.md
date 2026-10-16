@@ -84,10 +84,10 @@ Limits live in `config/policy.json`. The agent can read the policy but has **no 
 Assume a team of 2 to 5. Tracks: **A** = agent/backend, **B** = web UI and demo, **C** = contract and security docs. One person can own several tracks.
 
 ### Day 1 (Tue 13 Oct): get it running for real
-- [ ] Everyone: `npm install`, `npm test`, `npm run keygen`, fund the wallet from a faucet (ETH + Circle USDC on Base Sepolia).
-- [ ] A: first real T1 and T2 transfers from the CLI. Commit the first tx hashes.
-- [ ] A: point `LLM_*` at the team's model; run `npm run agent` and get one natural-language transfer through.
-- [ ] Everyone: register the team (registration closes at the same deadline).
+- [x] Everyone: `npm install`, `npm test`, `npm run keygen`, fund the wallet from a faucet (ETH + Circle USDC on Base Sepolia).
+- [x] A: first real T1 and T2 transfers from the CLI. Commit the first tx hashes.
+- [x] A: point `LLM_*` at the team's model; run `npm run agent` and get one natural-language transfer through.
+- [x] Everyone: register the team (registration closes with the same deadline).
 
 ### Day 2 (Wed 14 Oct): asset management depth (task completion)
 - [x] A: portfolio view tool: all balances with USD value (Chainlink price feed on Base Sepolia, or a fixed testnet price table, clearly labelled).
