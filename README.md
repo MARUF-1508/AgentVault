@@ -1,4 +1,4 @@
-# Agent Wallet
+# Agent Vault
 
 An AI wallet agent that autonomously executes on-chain operations (asset management, transaction execution, risk control) on **Base Sepolia**, behind a deterministic policy firewall the LLM cannot bypass.
 

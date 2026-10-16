@@ -1,4 +1,4 @@
-# Agent Wallet web UI (Day 4)
+# Agent Vault web UI (Day 4)
 
 Local demo interface: chat panel, portfolio card with budget limits, T2 approval
 card, and an audit timeline with a chain-integrity badge. Free tools only

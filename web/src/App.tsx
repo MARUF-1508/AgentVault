@@ -9,7 +9,7 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   return (
     <main>
-      <h1>Agent Wallet</h1>
+      <h1>Agent Vault</h1>
       <ApprovalCard onDecided={() => setRefreshKey((k) => k + 1)} />
       <div className="grid">
         <ChatPanel />

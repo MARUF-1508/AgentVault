@@ -71,7 +71,7 @@ async function main() {
     const webCtx: ToolContext = { clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) };
     const server = createServer({ env, ctx: webCtx, approver });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
-    return void console.log(`Agent Wallet UI on http://127.0.0.1:${port} (loopback only, no auth: local demo, do not expose).`);
+    return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (loopback only, no auth: local demo, do not expose).`);
   }
   const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE, vault);
   const schedules = readSchedules(env.SCHEDULES_FILE);
