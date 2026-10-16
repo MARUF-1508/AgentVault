@@ -18,6 +18,19 @@ const EnvSchema = z.object({
   AUDIT_LOG: z.string().default('data/audit.jsonl'),
   PAUSE_FILE: z.string().default('data/PAUSED'),
   ALLOW_MAINNET: z.string().default('false'),
+  // Deployed AgentVault and its externally-observed txs, for the evidence doc.
+  VAULT_ADDRESS: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'VAULT_ADDRESS must be a 0x-prefixed address')
+    .optional(),
+  VAULT_DEPLOY_TX: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_DEPLOY_TX must be a 0x-prefixed tx hash')
+    .optional(),
+  VAULT_REVERT_TX: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_REVERT_TX must be a 0x-prefixed tx hash')
+    .optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -45,7 +45,7 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | Prompt-injection defence: all tool output delimited as `<untrusted>` with forged tags neutralised; system prompt marks it as data | ✅ |
 | Address risk: contract-code check, local block list and address-poisoning lookalikes raise/deny before signing | ✅ |
 | Portfolio anomaly guard: a single request above `risk.maxActionPctOfPortfolio`% of total value is refused | ✅ |
-| On-chain limits (AgentVault): Foundry tests written (per-tx cap, daily reset, non-agent, pause, allowlist, owner-only) | ✅ tests / ⏳ deploy |
+| On-chain limits (AgentVault): deployed at `0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388` (Base Sepolia), 0.0005 ETH/tx, 0.01 ETH/day; over-limit agent call reverted on-chain; Foundry tests 10/10 | ✅ |
 
 ## 4. Known-risk list
 

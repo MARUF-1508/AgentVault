@@ -52,4 +52,27 @@ describe('renderEvidence', () => {
     expect(md).toContain('## On-chain transactions (0)');
     expect(md).toContain('_none yet_');
   });
+
+  it('renders the AgentVault section with deploy and revert hashes when configured', () => {
+    const md = renderEvidence([], {
+      auditLogPath: 'data/audit.jsonl',
+      chainIntegrity: { ok: true },
+      vault: {
+        address: '0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388',
+        deployTx: '0xdeploy',
+        revertTx: '0xrevert',
+        explorerBase: 'https://sepolia.basescan.org',
+      },
+    });
+    expect(md).toContain('## AgentVault (on-chain enforcement)');
+    expect(md).toContain('0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388');
+    expect(md).toContain('https://sepolia.basescan.org/address/0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388');
+    expect(md).toContain('https://sepolia.basescan.org/tx/0xrevert');
+    expect(md).toContain('reverted');
+  });
+
+  it('omits the AgentVault section when no vault is configured', () => {
+    const md = renderEvidence([], { auditLogPath: 'data/audit.jsonl', chainIntegrity: { ok: true } });
+    expect(md).not.toContain('## AgentVault');
+  });
 });

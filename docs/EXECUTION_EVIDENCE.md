@@ -1,7 +1,13 @@
 # Execution Evidence
 
-Generated 2026-10-16T16:28:46.371Z from `data/audit.jsonl`.
+Generated 2026-10-16T17:45:52.233Z from `data/audit.jsonl`.
 Audit chain integrity: ✅ intact
+## AgentVault (on-chain enforcement)
+
+Vault: [0x098f7Cb9…](https://sepolia.basescan.org/address/0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388)
+Deploy tx: [0xa63dea30…](https://sepolia.basescan.org/tx/0xa63dea30909b141cbfd44cb5c256e46559fc78dc15f502dfff1eb69a148a9b27) ✅ deployed
+Over-limit agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd71e8143568d1d418149b290ca0ddab5fc4015cebdfe3d5ef608ee47fb24e568) ❌ reverted on-chain (limits hold even with a compromised agent key)
+
 
 ## On-chain transactions (7)
 

@@ -8,7 +8,14 @@ import { renderEvidence } from '../src/report/evidence.js';
 const env = loadEnv();
 const audit = new AuditLog(env.AUDIT_LOG);
 const entries = audit.read();
-const md = renderEvidence(entries, { auditLogPath: env.AUDIT_LOG, chainIntegrity: audit.verify() });
+const explorerBase = env.CHAIN === 'sepolia' ? 'https://sepolia.etherscan.io' : 'https://sepolia.basescan.org';
+const md = renderEvidence(entries, {
+  auditLogPath: env.AUDIT_LOG,
+  chainIntegrity: audit.verify(),
+  vault: env.VAULT_ADDRESS
+    ? { address: env.VAULT_ADDRESS, deployTx: env.VAULT_DEPLOY_TX, revertTx: env.VAULT_REVERT_TX, explorerBase }
+    : undefined,
+});
 mkdirSync('docs', { recursive: true });
 writeFileSync('docs/EXECUTION_EVIDENCE.md', md);
 

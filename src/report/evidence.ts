@@ -9,6 +9,13 @@ export interface EvidenceOptions {
   chainIntegrity: ChainIntegrity;
   /** Injectable clock for deterministic output. */
   now?: Date;
+  /** Deployed vault and its externally-observed transactions (deploy + revert demo). */
+  vault?: {
+    address: string;
+    deployTx?: string;
+    revertTx?: string;
+    explorerBase?: string;
+  };
 }
 
 /**
@@ -40,7 +47,7 @@ export function renderEvidence(entries: AuditEntry[], opts: EvidenceOptions): st
 
 Generated ${now.toISOString()} from \`${opts.auditLogPath}\`.
 Audit chain integrity: ${integrity}
-
+${renderVault(opts.vault)}
 ## On-chain transactions (${sent.length})
 
 | Time (UTC) | Action | Amount | Tier | Result | Tx hash |
@@ -51,4 +58,18 @@ ${rows.join('\n') || '| | | | | | |'}
 
 ${denied.map((e) => `- ${e.ts}: ${(e.data.reasons as string[]).join(' ')}`).join('\n') || '_none yet_'}
 `;
+}
+
+/** Vault deployment and revert-demo hashes. Observed externally (explorer/RPC), not from the audit log. */
+function renderVault(vault: EvidenceOptions['vault']): string {
+  if (!vault) return '';
+  const base = (vault.explorerBase ?? '').replace(/\/$/, '');
+  const link = (kind: 'address' | 'tx', hash: string) => (base ? `[${hash.slice(0, 10)}…](${base}/${kind}/${hash})` : hash);
+  const lines = ['## AgentVault (on-chain enforcement)', '', `Vault: ${link('address', vault.address)}`];
+  if (vault.deployTx) lines.push(`Deploy tx: ${link('tx', vault.deployTx)} ✅ deployed`);
+  if (vault.revertTx)
+    lines.push(
+      `Over-limit agent call: ${link('tx', vault.revertTx)} ❌ reverted on-chain (limits hold even with a compromised agent key)`,
+    );
+  return lines.join('\n') + '\n\n';
 }

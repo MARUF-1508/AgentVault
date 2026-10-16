@@ -170,8 +170,8 @@ Or the one-liner equivalent:
 ```bash
 forge create contracts/AgentVault.sol:AgentVault \
   --rpc-url https://sepolia.base.org --private-key <OWNER_KEY> --broadcast \
-  --constructor-args <AGENT_ADDRESS> 500000000000000 10000000000000000 \
-  --value 0.01ether
+  --value 0.01ether \
+  --constructor-args <AGENT_ADDRESS> 500000000000000 10000000000000000
 ```
 
 ## Working on this with an AI coding agent
