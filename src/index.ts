@@ -6,7 +6,7 @@ import type OpenAI from 'openai';
 import { erc20Abi, parseUnits } from 'viem';
 import { chatTurn } from './agent/agent.js';
 import { runTool, type ToolContext } from './agent/tools.js';
-import { CliApprover } from './approval/approver.js';
+import { CliApprover, WebApprover } from './approval/approver.js';
 import { AuditLog } from './audit/log.js';
 import { makeClients } from './chain/client.js';
 import { loadEnv, loadPolicy } from './config.js';
@@ -14,6 +14,7 @@ import { Executor } from './executor/executor.js';
 import { tokenInfo } from './policy/engine.js';
 import { IntentSchema, type Intent } from './policy/types.js';
 import { loadSchedules, type Schedules } from './schedule/rules.js';
+import { createServer } from './web/server.js';
 import { runDueRules } from './schedule/runner.js';
 
 const USAGE = `Agent Wallet
@@ -28,6 +29,7 @@ const USAGE = `Agent Wallet
   npm run cli -- schedule [list|run]               scheduled / conditional rules
   npm run cli -- pause | resume                    kill switch
   npm run cli -- audit [verify|tail]               audit log
+  npm run cli -- serve [--port N]                  web UI (loopback only, no auth: local demo)
   npm run agent                                    chat with the AI agent
 `;
 
@@ -60,6 +62,16 @@ async function main() {
   }
 
   const clients = makeClients(env);
+  if (cmd === 'serve') {
+    const portRaw = rest.find((a) => /^\d+$/.test(a));
+    const port = portRaw ? Math.min(Math.max(parseInt(portRaw, 10), 1), 65535) : 5174;
+    const approver = new WebApprover();
+    const webExecutor = new Executor(clients, policy, audit, approver, env.PAUSE_FILE);
+    const webCtx: ToolContext = { clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) };
+    const server = createServer({ env, ctx: webCtx, approver });
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    return void console.log(`Agent Wallet UI on http://127.0.0.1:${port} (loopback only, no auth: local demo, do not expose).`);
+  }
   const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE);
   const schedules = readSchedules(env.SCHEDULES_FILE);
   const ctx: ToolContext = { clients, policy, executor, audit, schedules };

@@ -1,0 +1,26 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #0f1420; color: #e8ecf4; }
+main { max-width: 960px; margin: 0 auto; padding: 1rem; }
+h1 { font-size: 1.4rem; }
+.card { background: #1a2233; border: 1px solid #2c3a55; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+.card h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+.row { display: flex; gap: 0.5rem; align-items: center; }
+.spread { justify-content: space-between; }
+.muted { color: #93a0b8; font-size: 0.85rem; }
+.error { color: #ff8a8a; }
+.chat-log { max-height: 320px; overflow-y: auto; margin-bottom: 0.5rem; }
+.chat-log .you { color: #bcd3ff; }
+.chat-log .agent { color: #d7ffe0; }
+input { flex: 1; padding: 0.5rem; border-radius: 6px; border: 1px solid #2c3a55; background: #0f1420; color: inherit; }
+button { padding: 0.5rem 0.9rem; border-radius: 6px; border: 1px solid #2c3a55; background: #2b3c5e; color: #fff; cursor: pointer; }
+button:disabled { opacity: 0.5; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { text-align: left; padding: 0.35rem 0.4rem; border-bottom: 1px solid #2c3a55; }
+pre { white-space: pre-wrap; background: #0f1420; padding: 0.6rem; border-radius: 6px; font-size: 0.8rem; }
+.approval { border-color: #c9a227; }
+.approve { background: #1f6f43; }
+.reject { background: #8a2f2f; }
+.badge { padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.8rem; }
+.badge.ok { background: #1f6f43; }
+.badge.bad { background: #8a2f2f; }
