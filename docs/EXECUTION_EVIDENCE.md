@@ -1,6 +1,6 @@
 # Execution Evidence
 
-Generated 2026-10-16T17:53:26.879Z from `data/audit.jsonl`.
+Generated 2026-10-16T19:11:15.051Z from `data/audit.jsonl`.
 Audit chain integrity: ✅ intact
 ## AgentVault (on-chain enforcement)
 
@@ -12,7 +12,7 @@ Over-cap agent call (0.001 ETH): [0x22da3e42…](https://sepolia.basescan.org/tx
 Non-allowlisted agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd71e8143568d1d418149b290ca0ddab5fc4015cebdfe3d5ef608ee47fb24e568) ❌ reverted on-chain
 
 
-## On-chain transactions (7)
+## On-chain transactions (12)
 
 | Time (UTC) | Action | Amount | Tier | Result | Tx hash |
 |---|---|---|---|---|---|
@@ -23,8 +23,16 @@ Non-allowlisted agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd7
 | 2026-10-15T15:08:08.372Z | erc20_transfer | 0.5 USDC | T2_CONFIRM | ✅ block 48154301 | [0x2aa29a19…](https://sepolia.basescan.org/tx/0x2aa29a198ea1c4874dbe4bbfb10662df58704f8c1b923344097b13ebc2c0fbca) |
 | 2026-10-16T16:28:19.263Z | erc20_approve | 0.5 USDC | T1_AUTO | ✅ block 48199906 | [0xf43f810c…](https://sepolia.basescan.org/tx/0xf43f810cf632e8501ab0d469a6f176ee386fe6d08e4fe0564bf3ce0616b14b6d) |
 | 2026-10-16T16:28:28.119Z | swap | 0.5 USDC | T1_AUTO | ✅ block 48199910 | [0x8c85259b…](https://sepolia.basescan.org/tx/0x8c85259bda1f0829cd23a46591acb4184e0513e08040beaeb19c67207f53c3d5) |
+| 2026-10-16T18:56:54.682Z | native_transfer | 0.0002 ETH | T1_AUTO | ✅ block 48204364 | [0x7d3a9a88…](https://sepolia.basescan.org/tx/0x7d3a9a88a34e88a14bc2161245be6d6a1daf9a2740e9d8f7d551b306aa85d2a4) |
+| 2026-10-16T18:57:30.124Z | native_transfer | 0.002 ETH | T2_CONFIRM | ✅ block 48204382 | [0xe0e69dc5…](https://sepolia.basescan.org/tx/0xe0e69dc5e8395e1e2060318cbec1e85256a74e498252683f9b7f55b7709e2fca) |
+| 2026-10-16T18:58:10.880Z | erc20_approve | 0.5 USDC | T1_AUTO | ✅ block 48204402 | [0x340871f2…](https://sepolia.basescan.org/tx/0x340871f2aff3a80bcb4c1fc789e853a2ccf838d053535b4bfe7641759da9ad13) |
+| 2026-10-16T18:58:18.764Z | swap | 0.5 USDC | T1_AUTO | ✅ block 48204406 | [0xbf76a7bb…](https://sepolia.basescan.org/tx/0xbf76a7bbe12be71be821618bc35b55315a9fac09a658ac1589790015405461f9) |
+| 2026-10-16T19:06:06.512Z | native_transfer | 0.0001 ETH | T1_AUTO | ✅ block 48204640 | [0xd7bc3fab…](https://sepolia.basescan.org/tx/0xd7bc3fab2f93caa1b31645b0388d9910a3dc8607f769529b9b43dfc83853d788) |
 
-## Blocked by policy (2)
+## Blocked by policy (5)
 
 - 2026-10-15T13:42:56.732Z: 1 ETH exceeds the per-transaction hard cap of 0.005 ETH.
 - 2026-10-16T15:57:36.585Z: Unlimited token approvals are forbidden by policy.
+- 2026-10-16T18:56:16.396Z: 1 ETH exceeds the per-transaction hard cap of 0.005 ETH.
+- 2026-10-16T18:56:54.387Z: Unlimited token approvals are forbidden by policy.
+- 2026-10-16T18:58:54.400Z: Kill switch is on: the wallet is paused.

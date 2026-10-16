@@ -30,7 +30,7 @@ you ─▶ LLM agent ─▶ tool (zod-validated) ─▶ policy engine ─▶ sim
 git clone <your-repo-url> agent-wallet
 cd agent-wallet
 npm install
-npm test            # 84 tests, no network needed
+npm test            # 99 tests, no network needed
 ```
 
 ### 2. Create the agent's testnet wallet
@@ -78,6 +78,7 @@ npm run cli -- pause                               # kill switch: deny everythin
 npm run cli -- resume
 npm run cli -- audit                               # last 20 audit entries
 npm run cli -- audit verify                        # detect tampering
+npm run cli -- serve [--port N]                    # web UI on http://127.0.0.1:5174 (loopback only)
 npm run evidence                                   # docs/EXECUTION_EVIDENCE.md with tx hashes
 ```
 
@@ -89,6 +90,60 @@ you › send 0.0002 ETH to alice
   → execute_transaction({...})
 agent › Sent 0.0002 ETH to alice (T1, auto). Tx: https://sepolia.basescan.org/tx/0x…
 ```
+
+### Web UI
+
+```bash
+cd web && npm install && npm run build
+cd .. && npm run cli -- serve          # http://127.0.0.1:5174
+```
+
+Chat panel, portfolio card with budget limits, a T2 approval card (Approve/Reject
+resolves the same executor queue as the CLI), and an audit timeline with a chain-
+integrity badge. The server binds loopback only and has no auth: a local demo,
+never expose it. See `web/README.md`.
+
+### On-chain vault mode
+
+With a deployed `AgentVault` holding funds, set in `.env`:
+
+```bash
+VAULT=true
+VAULT_ADDRESS=0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388
+```
+
+Native transfers are then sent as zero-value `agentSend` calls paid out of the
+vault, so the per-tx cap, daily limit and allowlist are re-enforced on-chain
+(even a stolen agent key is capped). Policy evaluation is unchanged; ERC-20 and
+swaps are unaffected. `VAULT=true` without `VAULT_ADDRESS` refuses to start.
+
+---
+
+## For judges: testing this project
+
+No credentials are stored in this repo, by design (private keys are never
+committed). Everything below is free: testnet faucets, any free
+OpenAI-compatible LLM tier, Foundry, Vite.
+
+**Zero-key path (2 minutes, no wallet, no LLM key):**
+
+```bash
+npm install && npm test                # 99 unit tests, offline
+npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 0.0002   # T1 verdict, nothing sent
+npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1        # T3 verdict + reasons
+npm run cli -- audit verify             # tamper check (empty log reads intact)
+cat docs/EXECUTION_EVIDENCE.md          # our real testnet hashes + vault reverts
+forge install foundry-rs/forge-std --no-commit && forge test   # 10 contract tests
+```
+
+**Full signing path (about 5 minutes, still free):** follow Setup steps 2–5
+above (`npm run keygen`, fund from a Base Sepolia faucet, send 0.0001 ETH to an
+address you control). All demo amounts are tiny on purpose.
+
+**What maps to the scoring:** the demo script in
+`docs/IMPLEMENTATION_PLAN.md` §6 (10 scenarios → task/security/interaction),
+`docs/TECHNICAL.md` (architecture), `docs/SECURITY_SELF_ASSESSMENT.md`
+(tiers + known risks), `docs/EXECUTION_EVIDENCE.md` (tx hashes).
 
 ---
 
@@ -105,17 +160,20 @@ src/
   policy/types.ts       Policy, Intent, tiers, risk inputs
   policy/state.ts       daily spend + rate limit, derived from the audit log
   executor/executor.ts  policy → simulate → approve → sign → receipt → audit
-  approval/approver.ts  human-in-the-loop (CLI now, web later)
+  approval/approver.ts  human-in-the-loop: CLI prompt, WebApprover queue, DenyAll
   audit/log.ts          hash-chained, append-only JSONL log
   chain/client.ts       viem clients, mainnet guard
+  chain/vault.ts        AgentVault ABI (agentSend)
   dex/uniswap.ts        Uniswap v3 quoter + swap calldata (swap intent)
   prices/price.ts       USD valuation: Chainlink feed, else labelled testnet table
   portfolio/portfolio.ts T0 read-only balances + USD total
   risk/address.ts       contract-code, block-list and address-poisoning checks
   report/evidence.ts    renders docs/EXECUTION_EVIDENCE.md from the audit log
+  web/server.ts         loopback-only demo server (same executor, WebApprover)
   schedule/rules.ts     scheduled / conditional rule schema + due calculation
   schedule/runner.ts    runs due rules through the executor
 contracts/AgentVault.sol  on-chain spending limits (challenge bonus)
+web/                    Vite + React UI: chat, portfolio, approval card, timeline
 script/DeployAgentVault.s.sol  Foundry deploy script
 foundry.toml              Foundry config (AgentVault tests + deploy)
 config/policy.json        limits, allowlists, swap router, prices, risk
@@ -123,7 +181,7 @@ config/schedules.json     scheduled / conditional rules (user config)
 scripts/                  keygen, evidence
 test/                     vitest unit tests
 test/contracts/           Foundry tests for AgentVault
-docs/                     plan, security self-assessment, evidence
+  docs/                     plan, technical doc, security self-assessment, evidence
 ```
 
 ### Asset management: swaps and schedules

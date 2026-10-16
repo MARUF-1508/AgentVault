@@ -46,12 +46,13 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | Address risk: contract-code check, local block list and address-poisoning lookalikes raise/deny before signing | ✅ |
 | Portfolio anomaly guard: a single request above `risk.maxActionPctOfPortfolio`% of total value is refused | ✅ |
 | On-chain limits (AgentVault): deployed at `0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388` (Base Sepolia), 0.0005 ETH/tx, 0.01 ETH/day; over-limit agent call reverted on-chain; Foundry tests 10/10 | ✅ |
+| Vault-routing mode (`VAULT=true`): native transfers execute as zero-value `agentSend` calls, so payouts come from the pre-funded vault under on-chain caps; proven live (`0xd7bc3fab…`) | ✅ |
 
 ## 4. Known-risk list
 
 | # | Risk | Likelihood | Impact | Mitigation | Residual |
 |---|---|---|---|---|---|
-| R1 | Agent hot key stolen from `.env` | Low | Attacker bypasses off-chain policy | Testnet only; AgentVault caps on-chain loss to one day's limit | Off-chain limits don't apply to a stolen key until the vault is used |
+| R1 | Agent hot key stolen from `.env` | Low | Attacker bypasses off-chain policy | Testnet only; in `VAULT=true` mode funds sit in AgentVault, which caps on-chain loss to one day's limit even for a stolen key (proven: over-limit and non-allowlisted calls revert) | In default (EOA) mode the key still moves funds directly; route value through the vault |
 | R2 | Prompt injection makes the LLM propose a malicious transfer | Medium | Attempted theft | Policy firewall; tool output wrapped as `<untrusted>`; new recipients are T2; amounts capped | A human could approve a bad T2 if they don't read the card |
 | R3 | Human approval fatigue | Medium | Bad T2 approved | Plain-English reasons, small auto limits so T2 is rare | Social engineering of the human |
 | R4 | Audit log deleted entirely | Low | Daily budget resets | Hash chain detects edits, not full deletion | Stretch: anchor the head hash on-chain periodically |
@@ -60,7 +61,8 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | R7 | LLM misreads amounts/units | Medium | Wrong amount | Human-readable decimals only, zod regex, preview tool, hard caps | Bounded by caps |
 | R8 | Allowlisted address itself is compromised | Low | Funds to attacker | Daily budget bounds loss | Not detectable by us |
 | R9 | Dependency supply-chain attack (npm) | Low | Key exfiltration | Lockfile, few dependencies, `npm audit` | Inherent |
-| R10 | Uniswap v3 liquidity on Base Sepolia is thin or absent, so a swap reverts or quotes to zero | Medium | Swap demo fails, wasted gas | The engine refuses a swap with no valid quote; pool fee tier configured in policy; swap is droppable in favour of the core (task + security) | Swaps may be unavailable on this testnet |
+| R10 | Uniswap v3 liquidity on Base Sepolia is thin or absent, so a swap reverts or quotes to zero | Medium | Swap demo fails, wasted gas | Proven live twice (bounded approve + swap, hashes in evidence); the engine still refuses a swap with no valid quote, and quotes are shown before signing | Testnet quotes can be far from market; never present them as fair value |
 | R11 | Address-poisoning detection is a heuristic (matching leading/trailing hex digits), so a carefully crafted near-miss could evade it | Low | Funds to a lookalike | New (non-allowlisted) recipients are still T2, so a human sees the full address before approving | Social engineering of the human remains |
 | R12 | The anomaly guard uses the same price source as the portfolio; a missing or manipulated price disables or skews it | Low | A large request slips the guard | Hard caps and daily budgets always apply; prices are labelled (`chainlink`/`fixed-testnet-table`) and the guard is off only when a price is genuinely missing | On mainnet, oracle manipulation is a real residual |
 | R13 | The local block list is static and cannot know a brand-new scam address | Medium | Interaction with a fresh scam | New recipients are T2; block list + denylist raise known-bad addresses to T3 immediately | Inherent to any local list |
+| R14 | The web UI server has no authentication | Low (loopback-only) | Anyone on the machine could approve a T2 or chat with the agent's key | Binds 127.0.0.1 only; README warns never to expose it; CLI remains the hardened path | Do not host the UI; add auth before any shared deployment |
