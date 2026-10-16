@@ -18,6 +18,8 @@ const EnvSchema = z.object({
   AUDIT_LOG: z.string().default('data/audit.jsonl'),
   PAUSE_FILE: z.string().default('data/PAUSED'),
   ALLOW_MAINNET: z.string().default('false'),
+  // Executor vault-routing mode (VAULT=true sends native transfers via agentSend).
+  VAULT: z.string().default('false'),
   // Deployed AgentVault and its externally-observed txs, for the evidence doc.
   VAULT_ADDRESS: z
     .string()

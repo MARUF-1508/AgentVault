@@ -2,6 +2,7 @@ import { encodeFunctionData, erc20Abi, maxUint256, parseUnits, type Hex } from '
 import type { Approver } from '../approval/approver.js';
 import type { AuditLog } from '../audit/log.js';
 import { explorerTx, type Clients } from '../chain/client.js';
+import { agentVaultAbi } from '../chain/vault.js';
 import { encodeSwapCalldata, quoteExactInputSingle } from '../dex/uniswap.js';
 import { evaluate, intentAmount, intentAsset, tokenInfo } from '../policy/engine.js';
 import { spendStateFrom } from '../policy/state.js';
@@ -35,6 +36,12 @@ export class Executor {
     private readonly audit: AuditLog,
     private readonly approver: Approver,
     private readonly pauseFile: string,
+    /**
+     * Optional on-chain guardrail (VAULT=true). Native transfers are then sent
+     * as `agentSend` calls carrying zero value, so the vault's caps and
+     * allowlist re-enforce the policy on-chain. Policy evaluation is unchanged.
+     */
+    private readonly vault?: { address: `0x${string}` },
   ) {}
 
   /** Policy verdict without side effects (besides logging). Safe for the agent to call freely. */
@@ -177,6 +184,20 @@ export class Executor {
 
   private buildTx(intent: Intent, decision: Decision): TxRequest {
     if (intent.kind === 'native_transfer') {
+      // Vault mode: the vault (pre-funded by the owner) pays out; this call
+      // carries no value itself, so a stolen agent key cannot move more than
+      // the vault's on-chain caps even off-policy.
+      if (this.vault) {
+        return {
+          to: this.vault.address,
+          value: 0n,
+          data: encodeFunctionData({
+            abi: agentVaultAbi,
+            functionName: 'agentSend',
+            args: [intent.to, parseUnits(intent.amount, 18)],
+          }),
+        };
+      }
       return { to: intent.to, value: parseUnits(intent.amount, 18) };
     }
     if (intent.kind === 'swap') {
@@ -235,6 +256,9 @@ export class Executor {
       `  Amount : ${amt} ${intent.kind === 'swap' ? '' : d.asset}`.trimEnd(),
       `  Target : ${target}`,
     ];
+    if (intent.kind === 'native_transfer' && this.vault) {
+      lines.push(`  Via    : AgentVault ${this.vault.address} (on-chain caps apply)`);
+    }
     if (intent.kind === 'swap' && d.minAmountOut !== undefined) {
       lines.push(`  Min out: ${d.minAmountOut} (base units of ${intent.tokenOut})`);
     }

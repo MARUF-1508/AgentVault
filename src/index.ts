@@ -62,17 +62,18 @@ async function main() {
   }
 
   const clients = makeClients(env);
+  const vault = vaultConfig(env);
   if (cmd === 'serve') {
     const portRaw = rest.find((a) => /^\d+$/.test(a));
     const port = portRaw ? Math.min(Math.max(parseInt(portRaw, 10), 1), 65535) : 5174;
     const approver = new WebApprover();
-    const webExecutor = new Executor(clients, policy, audit, approver, env.PAUSE_FILE);
+    const webExecutor = new Executor(clients, policy, audit, approver, env.PAUSE_FILE, vault);
     const webCtx: ToolContext = { clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) };
     const server = createServer({ env, ctx: webCtx, approver });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     return void console.log(`Agent Wallet UI on http://127.0.0.1:${port} (loopback only, no auth: local demo, do not expose).`);
   }
-  const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE);
+  const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE, vault);
   const schedules = readSchedules(env.SCHEDULES_FILE);
   const ctx: ToolContext = { clients, policy, executor, audit, schedules };
   const dryRun = rest.includes('--dry-run');
@@ -117,6 +118,19 @@ async function main() {
 /** Reads schedules.json if present; a missing file just means no rules. */
 function readSchedules(path: string): Schedules {
   return existsSync(path) ? loadSchedules(path) : { version: 1, rules: [] };
+}
+
+/**
+ * Vault-routing mode (VAULT=true): native transfers go through agentSend on the
+ * deployed vault, so on-chain caps apply. Fail closed when the address is missing.
+ */
+function vaultConfig(env: ReturnType<typeof loadEnv>): { address: `0x${string}` } | undefined {
+  if (env.VAULT !== 'true') return undefined;
+  if (!env.VAULT_ADDRESS) {
+    console.error('VAULT=true but VAULT_ADDRESS is not set. Set it in .env or unset VAULT.');
+    process.exit(1);
+  }
+  return { address: env.VAULT_ADDRESS as `0x${string}` };
 }
 
 /**
