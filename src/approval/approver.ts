@@ -24,3 +24,33 @@ export class DenyAllApprover implements Approver {
     return false;
   }
 }
+
+/**
+ * Approver driven by the web UI instead of the terminal. `confirm` parks the
+ * request until the UI answers via `decide` (approve/reject buttons on the T2
+ * card). Concurrent requests are denied rather than queued: fail closed.
+ */
+export class WebApprover implements Approver {
+  private pending: { summary: string; resolve: (ok: boolean) => void } | null = null;
+
+  confirm(summary: string): Promise<boolean> {
+    if (this.pending) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      this.pending = { summary, resolve };
+    });
+  }
+
+  /** The currently waiting request, if any, for the UI to display. */
+  getPending(): string | null {
+    return this.pending?.summary ?? null;
+  }
+
+  /** Resolve the waiting request. Returns false when nothing is waiting. */
+  decide(approved: boolean): boolean {
+    const waiting = this.pending;
+    if (!waiting) return false;
+    this.pending = null;
+    waiting.resolve(approved);
+    return true;
+  }
+}
