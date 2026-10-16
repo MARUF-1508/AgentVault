@@ -53,14 +53,17 @@ describe('renderEvidence', () => {
     expect(md).toContain('_none yet_');
   });
 
-  it('renders the AgentVault section with deploy and revert hashes when configured', () => {
+  it('renders the AgentVault section with deploy and transaction hashes when configured', () => {
     const md = renderEvidence([], {
       auditLogPath: 'data/audit.jsonl',
       chainIntegrity: { ok: true },
       vault: {
         address: '0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388',
         deployTx: '0xdeploy',
-        revertTx: '0xrevert',
+        txs: [
+          { label: 'Over-cap agent call', hash: '0xrevert', result: 'reverted' },
+          { label: 'Within-limit agent send', hash: '0xok', result: 'confirmed' },
+        ],
         explorerBase: 'https://sepolia.basescan.org',
       },
     });
@@ -68,7 +71,9 @@ describe('renderEvidence', () => {
     expect(md).toContain('0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388');
     expect(md).toContain('https://sepolia.basescan.org/address/0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388');
     expect(md).toContain('https://sepolia.basescan.org/tx/0xrevert');
+    expect(md).toContain('Over-cap agent call');
     expect(md).toContain('reverted');
+    expect(md).toContain('Within-limit agent send');
   });
 
   it('omits the AgentVault section when no vault is configured', () => {

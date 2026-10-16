@@ -27,9 +27,21 @@ const EnvSchema = z.object({
     .string()
     .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_DEPLOY_TX must be a 0x-prefixed tx hash')
     .optional(),
+  VAULT_SET_RECIPIENT_TX: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_SET_RECIPIENT_TX must be a 0x-prefixed tx hash')
+    .optional(),
+  VAULT_SEND_TX: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_SEND_TX must be a 0x-prefixed tx hash')
+    .optional(),
   VAULT_REVERT_TX: z
     .string()
     .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_REVERT_TX must be a 0x-prefixed tx hash')
+    .optional(),
+  VAULT_DENY_TX: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_DENY_TX must be a 0x-prefixed tx hash')
     .optional(),
 });
 

@@ -9,11 +9,11 @@ export interface EvidenceOptions {
   chainIntegrity: ChainIntegrity;
   /** Injectable clock for deterministic output. */
   now?: Date;
-  /** Deployed vault and its externally-observed transactions (deploy + revert demo). */
+  /** Deployed vault and its externally-observed transactions (deploy + demos). */
   vault?: {
     address: string;
     deployTx?: string;
-    revertTx?: string;
+    txs?: { label: string; hash: string; result: 'confirmed' | 'reverted' }[];
     explorerBase?: string;
   };
 }
@@ -67,9 +67,9 @@ function renderVault(vault: EvidenceOptions['vault']): string {
   const link = (kind: 'address' | 'tx', hash: string) => (base ? `[${hash.slice(0, 10)}…](${base}/${kind}/${hash})` : hash);
   const lines = ['## AgentVault (on-chain enforcement)', '', `Vault: ${link('address', vault.address)}`];
   if (vault.deployTx) lines.push(`Deploy tx: ${link('tx', vault.deployTx)} ✅ deployed`);
-  if (vault.revertTx)
-    lines.push(
-      `Over-limit agent call: ${link('tx', vault.revertTx)} ❌ reverted on-chain (limits hold even with a compromised agent key)`,
-    );
+  for (const t of vault.txs ?? []) {
+    const mark = t.result === 'reverted' ? '❌ reverted on-chain' : '✅ confirmed';
+    lines.push(`${t.label}: ${link('tx', t.hash)} ${mark}`);
+  }
   return lines.join('\n') + '\n\n';
 }

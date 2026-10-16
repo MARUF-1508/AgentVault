@@ -1,12 +1,15 @@
 # Execution Evidence
 
-Generated 2026-10-16T17:45:52.233Z from `data/audit.jsonl`.
+Generated 2026-10-16T17:53:26.879Z from `data/audit.jsonl`.
 Audit chain integrity: ✅ intact
 ## AgentVault (on-chain enforcement)
 
 Vault: [0x098f7Cb9…](https://sepolia.basescan.org/address/0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388)
 Deploy tx: [0xa63dea30…](https://sepolia.basescan.org/tx/0xa63dea30909b141cbfd44cb5c256e46559fc78dc15f502dfff1eb69a148a9b27) ✅ deployed
-Over-limit agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd71e8143568d1d418149b290ca0ddab5fc4015cebdfe3d5ef608ee47fb24e568) ❌ reverted on-chain (limits hold even with a compromised agent key)
+Owner allowlist (alice): [0x731ef8d4…](https://sepolia.basescan.org/tx/0x731ef8d423eb9fdf89f527650037891ab84832942642b5d21bb7dd39ff375c55) ✅ confirmed
+Within-limit agent send (0.0002 ETH to alice): [0xfdfbb94d…](https://sepolia.basescan.org/tx/0xfdfbb94d4c684d5338fa527d9692dbb4d75e83c6fae75175845ec729a8f80212) ✅ confirmed
+Over-cap agent call (0.001 ETH): [0x22da3e42…](https://sepolia.basescan.org/tx/0x22da3e428ad04d45ebff727dedafd1734a4c8730556765b37f0009f57d921be0) ❌ reverted on-chain
+Non-allowlisted agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd71e8143568d1d418149b290ca0ddab5fc4015cebdfe3d5ef608ee47fb24e568) ❌ reverted on-chain
 
 
 ## On-chain transactions (7)
