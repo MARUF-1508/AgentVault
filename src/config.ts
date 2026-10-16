@@ -14,6 +14,7 @@ const EnvSchema = z.object({
   LLM_API_KEY: z.string().optional(),
   LLM_MODEL: z.string().default('gpt-4o-mini'),
   POLICY_FILE: z.string().default('config/policy.json'),
+  SCHEDULES_FILE: z.string().default('config/schedules.json'),
   AUDIT_LOG: z.string().default('data/audit.jsonl'),
   PAUSE_FILE: z.string().default('data/PAUSED'),
   ALLOW_MAINNET: z.string().default('false'),

@@ -10,6 +10,7 @@ export type AuditType =
   | 'tx_sent'       // broadcast, with hash
   | 'tx_confirmed'  // mined, with receipt status
   | 'tx_failed'
+  | 'schedule'      // a scheduled/conditional rule fired
   | 'kill_switch';
 
 export interface AuditEntry {

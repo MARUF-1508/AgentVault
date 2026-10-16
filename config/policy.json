@@ -14,6 +14,13 @@
       "autoMaxPerTx": "1",
       "hardMaxPerTx": "10",
       "dailyBudget": "25"
+    },
+    "WETH": {
+      "address": "0x4200000000000000000000000000000000000006",
+      "decimals": 18,
+      "autoMaxPerTx": "0.001",
+      "hardMaxPerTx": "0.01",
+      "dailyBudget": "0.02"
     }
   },
   "recipients": {
@@ -24,7 +31,27 @@
   },
   "approvals": {
     "allowUnlimited": false,
-    "spenderAllowlist": {}
+    "spenderAllowlist": {
+      "uniswapV3Router": "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4"
+    }
+  },
+  "swap": {
+    "router": "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+    "quoter": "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
+    "feeTier": 3000,
+    "maxSlippageBps": 100,
+    "autoMaxSlippageBps": 50
+  },
+  "prices": {
+    "ETH": { "fallbackUsd": "2500" },
+    "WETH": { "fallbackUsd": "2500" },
+    "USDC": { "fallbackUsd": "1" }
+  },
+  "risk": {
+    "maxActionPctOfPortfolio": 50,
+    "contractRecipients": "confirm",
+    "blocklist": ["0x000000000000000000000000000000000000dEaD"],
+    "lookalike": { "enabled": true, "prefix": 4, "suffix": 4 }
   },
   "rateLimit": {
     "maxTxPerHour": 10

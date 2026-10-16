@@ -1,8 +1,9 @@
-import { rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import type OpenAI from 'openai';
+import { erc20Abi, parseUnits } from 'viem';
 import { chatTurn } from './agent/agent.js';
 import { runTool, type ToolContext } from './agent/tools.js';
 import { CliApprover } from './approval/approver.js';
@@ -10,15 +11,21 @@ import { AuditLog } from './audit/log.js';
 import { makeClients } from './chain/client.js';
 import { loadEnv, loadPolicy } from './config.js';
 import { Executor } from './executor/executor.js';
+import { tokenInfo } from './policy/engine.js';
 import { IntentSchema, type Intent } from './policy/types.js';
+import { loadSchedules, type Schedules } from './schedule/rules.js';
+import { runDueRules } from './schedule/runner.js';
 
 const USAGE = `Agent Wallet
 
   npm run cli -- info                              wallet address, chain, balance
+  npm run cli -- portfolio                         balances with USD value
   npm run cli -- balance <TOKEN>                   token balance (e.g. USDC)
   npm run cli -- send <to> <amount> [TOKEN] [--dry-run]
   npm run cli -- approve <TOKEN> <spender> <amount|unlimited> [--dry-run]
+  npm run cli -- swap <tokenIn> <tokenOut> <amountIn> [slippageBps] [--dry-run]
   npm run cli -- preview <to> <amount> [TOKEN]     policy tier only, nothing sent
+  npm run cli -- schedule [list|run]               scheduled / conditional rules
   npm run cli -- pause | resume                    kill switch
   npm run cli -- audit [verify|tail]               audit log
   npm run agent                                    chat with the AI agent
@@ -54,31 +61,100 @@ async function main() {
 
   const clients = makeClients(env);
   const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE);
-  const ctx: ToolContext = { clients, policy, executor, audit };
+  const schedules = readSchedules(env.SCHEDULES_FILE);
+  const ctx: ToolContext = { clients, policy, executor, audit, schedules };
   const dryRun = rest.includes('--dry-run');
   const args = rest.filter((a) => a !== '--dry-run');
 
   switch (cmd) {
     case 'info':
       return print(await runTool('get_wallet_info', '{}', ctx));
+    case 'portfolio':
+      return print(await runTool('get_portfolio', '{}', ctx));
     case 'balance':
       return print(await runTool('get_token_balance', JSON.stringify({ token: args[0] }), ctx));
     case 'preview':
     case 'send': {
       const [to, amount, token] = args;
       const intent = parseIntent(token ? { kind: 'erc20_transfer', to, amount, token } : { kind: 'native_transfer', to, amount });
-      if (cmd === 'preview') return print(executor.preview(intent));
+      if (cmd === 'preview') return print(await executor.preview(intent));
       return print(await executor.execute(intent, { dryRun }));
     }
     case 'approve': {
       const [token, spender, amount] = args;
       return print(await executor.execute(parseIntent({ kind: 'erc20_approve', token, spender, amount }), { dryRun }));
     }
+    case 'swap':
+      return cmdSwap(args, dryRun, ctx);
+    case 'schedule':
+    case 'schedules': {
+      if (args[0] === 'run') {
+        const results = await runDueRules({ clients, policy, executor, audit, schedules }, { dryRun });
+        return print({ ran: results.length, results });
+      }
+      return print(schedules);
+    }
     case 'chat':
       return chat(env, ctx);
     default:
       console.log(USAGE);
+      process.exitCode = 1;
   }
+}
+
+/** Reads schedules.json if present; a missing file just means no rules. */
+function readSchedules(path: string): Schedules {
+  return existsSync(path) ? loadSchedules(path) : { version: 1, rules: [] };
+}
+
+/**
+ * swap <tokenIn> <tokenOut> <amountIn> [slippageBps] [--dry-run]
+ * Sends a bounded approval first only if the current allowance is short, then the
+ * swap. Both steps go through the executor, so both are policy-checked and logged.
+ */
+async function cmdSwap(args: string[], dryRun: boolean, ctx: ToolContext) {
+  const { publicClient, account } = ctx.clients;
+  const swap = ctx.policy.swap;
+  if (!swap) return print({ error: 'Swaps are not enabled in the policy.' });
+
+  const [tokenInSym, tokenOutSym, amountIn, bpsRaw] = args;
+  const tokenIn = tokenInfo(ctx.policy, tokenInSym ?? '');
+  if (!tokenIn || !tokenOutSym || !amountIn) {
+    console.error(`Usage: swap <tokenIn> <tokenOut> <amountIn> [slippageBps]\n\n${USAGE}`);
+    process.exit(1);
+  }
+  const slippageBps = bpsRaw ? Number(bpsRaw) : swap.autoMaxSlippageBps;
+  const intent = parseIntent({ kind: 'swap', tokenIn: tokenInSym, tokenOut: tokenOutSym, amountIn, slippageBps });
+  const steps: Record<string, unknown>[] = [];
+
+  // Validate the swap before any approval, so a denied swap leaves no allowance behind.
+  const decision = await ctx.executor.preview(intent);
+  if (decision.tier === 'T3_DENY') {
+    return print({ steps, tier: decision.tier, reasons: decision.reasons, error: 'Swap denied by policy; no approval sent.' });
+  }
+
+  if (account) {
+    const need = parseUnits(amountIn, tokenIn.decimals);
+    const allowance = await publicClient.readContract({
+      address: tokenIn.address,
+      abi: erc20Abi,
+      functionName: 'allowance',
+      args: [account.address, swap.router],
+    });
+    if (allowance >= need) {
+      steps.push({ step: 'approve', status: 'skipped', reason: 'allowance sufficient' });
+    } else if (dryRun) {
+      steps.push({ step: 'approve', status: 'needed', reason: 'would approve exactly amountIn (bounded)' });
+    } else {
+      const a = await ctx.executor.execute({ kind: 'erc20_approve', token: tokenInSym, spender: swap.router, amount: amountIn });
+      steps.push({ step: 'approve', status: a.status, tier: a.decision.tier, txHash: a.txHash });
+      if (a.status !== 'executed') return print({ steps, error: 'Approval step did not execute; swap not attempted.' });
+    }
+  }
+
+  const r = await ctx.executor.execute(intent, { dryRun });
+  steps.push({ step: 'swap', status: r.status, tier: r.decision.tier, reasons: r.decision.reasons, txHash: r.txHash, explorerUrl: r.explorerUrl, error: r.error });
+  return print({ steps });
 }
 
 async function chat(env: ReturnType<typeof loadEnv>, ctx: ToolContext) {

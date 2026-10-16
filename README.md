@@ -30,7 +30,7 @@ you ─▶ LLM agent ─▶ tool (zod-validated) ─▶ policy engine ─▶ sim
 git clone <your-repo-url> agent-wallet
 cd agent-wallet
 npm install
-npm test            # 24 tests, no network needed
+npm test            # 84 tests, no network needed
 ```
 
 ### 2. Create the agent's testnet wallet
@@ -64,11 +64,16 @@ Edit `config/policy.json`. Add the addresses you trust to `recipients.allowlist`
 
 ```bash
 npm run agent                                      # chat with the agent
+npm run cli -- portfolio                           # all balances with USD value
 npm run cli -- preview <to> 0.0001                 # which tier? nothing is sent
 npm run cli -- send <to> 0.0001 --dry-run          # policy + simulation, nothing sent
 npm run cli -- send <to> 0.0001                    # native ETH
 npm run cli -- send <to> 0.5 USDC                  # ERC-20
 npm run cli -- approve USDC <spender> 1            # bounded ERC-20 approval
+npm run cli -- swap USDC WETH 2 50 --dry-run       # quote + policy, nothing sent (50 bps cap)
+npm run cli -- swap USDC WETH 2 50                 # bounded approve + swap on the DEX
+npm run cli -- schedule list                       # show scheduled / conditional rules
+npm run cli -- schedule run                        # run any due rules (each through the executor)
 npm run cli -- pause                               # kill switch: deny everything
 npm run cli -- resume
 npm run cli -- audit                               # last 20 audit entries
@@ -95,36 +100,77 @@ src/
   config.ts             env + policy loading (zod)
   agent/agent.ts        LLM tool-calling loop, system prompt
   agent/tools.ts        tool definitions + validated dispatch
+  agent/untrusted.ts    wraps external text as <untrusted> data (prompt-injection defence)
   policy/engine.ts      ★ the policy firewall (pure function)
-  policy/types.ts       Policy, Intent, tiers
+  policy/types.ts       Policy, Intent, tiers, risk inputs
   policy/state.ts       daily spend + rate limit, derived from the audit log
   executor/executor.ts  policy → simulate → approve → sign → receipt → audit
   approval/approver.ts  human-in-the-loop (CLI now, web later)
   audit/log.ts          hash-chained, append-only JSONL log
   chain/client.ts       viem clients, mainnet guard
+  dex/uniswap.ts        Uniswap v3 quoter + swap calldata (swap intent)
+  prices/price.ts       USD valuation: Chainlink feed, else labelled testnet table
+  portfolio/portfolio.ts T0 read-only balances + USD total
+  risk/address.ts       contract-code, block-list and address-poisoning checks
+  report/evidence.ts    renders docs/EXECUTION_EVIDENCE.md from the audit log
+  schedule/rules.ts     scheduled / conditional rule schema + due calculation
+  schedule/runner.ts    runs due rules through the executor
 contracts/AgentVault.sol  on-chain spending limits (challenge bonus)
-config/policy.json        limits, allowlists
+script/DeployAgentVault.s.sol  Foundry deploy script
+foundry.toml              Foundry config (AgentVault tests + deploy)
+config/policy.json        limits, allowlists, swap router, prices, risk
+config/schedules.json     scheduled / conditional rules (user config)
 scripts/                  keygen, evidence
-test/                     vitest
+test/                     vitest unit tests
+test/contracts/           Foundry tests for AgentVault
 docs/                     plan, security self-assessment, evidence
 ```
 
+### Asset management: swaps and schedules
+
+- **Portfolio** (`get_portfolio` tool / `portfolio` command): every policy asset's balance with a USD value. Prices come from a Chainlink feed when one is configured in `policy.prices`, otherwise a clearly-labelled `fixed-testnet-table`. Read-only (T0).
+- **Swap** (`execute_swap` tool / `swap` command): a `swap` intent priced by the Uniswap v3 QuoterV2. The engine derives the on-chain minimum output from the quote and the slippage cap, refuses anything above `swap.maxSlippageBps`, and only ever calls the allowlisted router. A bounded approval (exactly `amountIn`, never unlimited) is sent first and only if the current allowance is short, and that approval is itself a policy-checked intent.
+- **Scheduled / conditional rules** (`config/schedules.json`): e.g. "send 1 USDC to Alice every Friday" or "move 50% to USDC if ETH drops 5%". Rules are user configuration (there is no LLM tool to write them); `npm run cli -- schedule run` turns each due rule into a normal `Intent` and runs it through the same executor. A rule that already fired today (per the audit log) is skipped. Rules ship disabled — enable them deliberately.
+
+### Risk controls
+
+Every state-changing action is checked against `config/policy.json` → `risk` in addition to the limits, and these findings can only **raise** the tier:
+
+- **Address risk** (`src/risk/address.ts`, applied before T1/T2): is the target a contract (does it have code)? Is it on the local `blocklist`? Does it imitate an allowlisted address by sharing leading/trailing characters (address poisoning)? A block-listed or poisoning address is T3; a non-allowlisted contract is T2 (or T3 if `contractRecipients: "deny"`). The one chain read (`getCode`) happens in the executor; the engine stays a pure function.
+- **Portfolio anomaly guard**: a single request whose USD value exceeds `maxActionPctOfPortfolio`% of the whole portfolio is refused (T3). Set it to `0` to disable.
+- **Prompt-injection defence** (`src/agent/untrusted.ts`): every tool result is delivered to the model inside `<untrusted>…</untrusted>`, with any forged tags neutralised, and the system prompt marks it as data. `test/injection.test.ts` feeds a hostile memo ("ignore previous instructions…") and proves the policy still refuses the transfer and nothing is sent.
+
 ## Tests
 ```bash
-npm test          # unit tests
+npm test          # unit tests (vitest)
 npm run typecheck
 ```
 Every security claim in `docs/SECURITY_SELF_ASSESSMENT.md` should have a test. Add one with every new rule.
 
+### Contract tests (Foundry)
+`contracts/AgentVault.sol` enforces the caps on-chain, so a stolen agent key can't exceed them. Its tests live in `test/contracts/` and need [Foundry](https://book.getfoundry.sh/):
+```bash
+forge install foundry-rs/forge-std   # once
+forge test                           # per-tx cap, daily reset, non-agent revert, pause, allowlist, owner-only
+```
+
 ## Deploying AgentVault (stretch)
-With [Foundry](https://book.getfoundry.sh/):
+The vault is deployed by the **owner** (a key different from the agent's). With [Foundry](https://book.getfoundry.sh/):
+```bash
+export AGENT_ADDRESS=0x...                       # the agent's funded key
+export VAULT_MAX_PER_TX=500000000000000          # 0.0005 ether
+export VAULT_DAILY_LIMIT=10000000000000000       # 0.01 ether
+export VAULT_FUNDING=10000000000000000           # optional
+forge script script/DeployAgentVault.s.sol \
+  --rpc-url https://sepolia.base.org --private-key <OWNER_KEY> --broadcast
+```
+Or the one-liner equivalent:
 ```bash
 forge create contracts/AgentVault.sol:AgentVault \
   --rpc-url https://sepolia.base.org --private-key <OWNER_KEY> --broadcast \
   --constructor-args <AGENT_ADDRESS> 500000000000000 10000000000000000 \
   --value 0.01ether
 ```
-The owner key should be a different key from the agent key.
 
 ## Working on this with an AI coding agent
 `AGENTS.md` holds the project rules and `.opencode/skills/agent-wallet/SKILL.md` is an opencode skill with the workflow. opencode picks both up automatically when run from the repo root.
