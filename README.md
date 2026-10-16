@@ -157,6 +157,8 @@ forge test                           # per-tx cap, daily reset, non-agent revert
 ## Deploying AgentVault (stretch)
 The vault is deployed by the **owner** (a key different from the agent's). With [Foundry](https://book.getfoundry.sh/):
 ```bash
+forge install foundry-rs/forge-std --no-commit   # once per clone (lib/ is git-ignored)
+forge test                                       # 10 contract tests, no network needed
 export AGENT_ADDRESS=0x...                       # the agent's funded key
 export VAULT_MAX_PER_TX=500000000000000          # 0.0005 ether
 export VAULT_DAILY_LIMIT=10000000000000000       # 0.01 ether

@@ -98,4 +98,8 @@ contract AgentVaultTest is Test {
         assertTrue(ok);
         assertEq(address(vault).balance, 1.1 ether);
     }
+
+    // The test contract is the vault owner, so it must accept the ETH that
+    // `withdraw` sends it; without this, the withdraw reverts with TransferFailed.
+    receive() external payable {}
 }

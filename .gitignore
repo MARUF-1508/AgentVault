@@ -18,6 +18,7 @@ out/
 cache/
 lib/
 broadcast/
+foundry.lock
 
 # test coverage
 coverage/
