@@ -1,6 +1,5 @@
 import { QrCode, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
-import CountUp from 'react-countup';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getPortfolio, type Budget } from '../api';
 import { useWallet } from '../data';
@@ -45,6 +44,38 @@ export function BudgetMeters({ budget }: { budget: Budget | null }) {
   );
 }
 
+/**
+ * Animated USD total. Local on purpose: react-countup ships CJS-only and the
+ * production bundler mis-resolved its default export (React error #130), so
+ * we keep this 20-line animation instead of the dependency.
+ */
+function UsdTotal({ value }: { value: number }) {
+  const [shown, setShown] = useState(value);
+  const from = useRef(value);
+  useEffect(() => {
+    const a = from.current;
+    const b = value;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || a === b || !Number.isFinite(b)) {
+      from.current = b;
+      setShown(b);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const step = (t: number) => {
+      const k = Math.min(1, (t - start) / 1100);
+      const eased = 1 - (1 - k) ** 3;
+      setShown(a + (b - a) * eased);
+      if (k < 1) raf = requestAnimationFrame(step);
+      else from.current = b;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <>${shown.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
+}
+
 export function Holdings() {
   const { refreshKey, status } = useWallet();
   const [portfolio, error, refresh] = usePoll(getPortfolio, 30_000, [refreshKey]);
@@ -69,7 +100,7 @@ export function Holdings() {
       {portfolio && (
         <>
           <p className="total">
-            <CountUp end={Number(portfolio.totalUsd) || 0} prefix="$" decimals={2} separator="," duration={1.1} preserveValue />{' '}
+            <UsdTotal value={Number(portfolio.totalUsd) || 0} />{' '}
             <span className="muted small">total, testnet value</span>
           </p>
           {portfolio.holdings.length === 0 ? (

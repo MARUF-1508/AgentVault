@@ -32,6 +32,14 @@ test('first-run setup lands on the dashboard', async ({ page }) => {
   await page.getByRole('button', { name: /create owner and sign in/i }).click();
 
   await expect(page.getByRole('heading', { name: /welcome back, demo/i })).toBeVisible();
+
+  // Regression guard: the dashboard used to crash once the portfolio and the
+  // lazy activity chart finished loading (React error #130 from a CJS-only
+  // dependency being mis-bundled in production). Let both settle, then assert
+  // the error boundary never took over.
+  await expect(page.getByRole('heading', { name: 'Holdings' })).toBeVisible();
+  await page.waitForTimeout(3000);
+  await expect(page.getByText('Something broke in the interface')).toHaveCount(0);
 });
 
 test('previewing an allowlisted transfer shows T1 and sends nothing', async ({ page }) => {
