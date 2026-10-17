@@ -17,6 +17,8 @@ const EnvSchema = z.object({
   SCHEDULES_FILE: z.string().default('config/schedules.json'),
   AUDIT_LOG: z.string().default('data/audit.jsonl'),
   PAUSE_FILE: z.string().default('data/PAUSED'),
+  // Web-UI accounts (scrypt hashes). Managed with `npm run cli -- user ...`.
+  USERS_FILE: z.string().default('data/users.json'),
   ALLOW_MAINNET: z.string().default('false'),
   // Executor vault-routing mode (VAULT=true sends native transfers via agentSend).
   VAULT: z.string().default('false'),

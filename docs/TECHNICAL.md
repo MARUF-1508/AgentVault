@@ -69,7 +69,8 @@ Stretch: payments route through AgentVault.sol, which re-enforces caps on-chain.
 | `src/audit/log.ts` | Append-only hash-chained JSONL log; also the budget source of truth |
 | `src/report/evidence.ts` | Pure renderer for `EXECUTION_EVIDENCE.md` (audit txs + externally-observed vault hashes) |
 | `src/chain/client.ts` | viem clients + mainnet refusal guard |
-| `src/web/server.ts` | Loopback-only demo server (no auth): same executor, `WebApprover` instead of CLI |
+| `src/web/server.ts` | Loopback-only UI server: sign-in, role checks per route, same executor, `WebApprover` instead of CLI |
+| `src/auth/rbac.ts`, `src/auth/users.ts` | Roles and permissions (pure); scrypt user store, sessions and login throttle |
 | `src/config.ts` | zod-validated env + policy loading |
 | `contracts/AgentVault.sol` | On-chain per-tx cap, daily limit, recipient allowlist, pause (owner = human) |
 
@@ -139,8 +140,14 @@ that writes schedules.
   `audit verify` detects edits (`sequence gap`, `prevHash mismatch`, `content
   hash mismatch`). Budgets derive from this log, not from mutable state.
 - **Fail closed.** RPC failures in risk checks are treated as "is a
-  contract"; concurrent web approvals are denied, not queued; unknown
-  tokens, venues and chains are denied.
+  contract"; concurrent web approvals are denied, not queued, and an
+  unanswered one is rejected after two minutes; unknown tokens, venues and
+  chains are denied.
+- **Local UI is not a browser back door.** The web server refuses a
+  non-loopback `Host` (DNS rebinding), a non-loopback `Origin` (another
+  website) and any POST that is not `application/json`, so a page in the
+  same browser cannot approve a T2 or trigger a transfer. The UI can pause the
+  wallet but not resume it; resuming stays CLI-only.
 - **Testnet only.** `chain.client.ts` refuses mainnet unless explicitly
   enabled; keys live in git-ignored `.env` (chmod 600) and are never printed,
   logged or committed. Unlimited approvals are forbidden by policy.

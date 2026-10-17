@@ -103,8 +103,8 @@ Assume a team of 2 to 5. Tracks: **A** = agent/backend, **B** = web UI and demo,
 - [ ] C: deploy `AgentVault.sol` to Base Sepolia and record the deploy hash. _(Blocked in this environment: no funded owner key or RPC. Run the documented `forge script` from `script/DeployAgentVault.s.sol` on a machine with keys.)_
 
 ### Day 4 (Fri 16 Oct): interaction and innovation
-- [ ] B: **Web UI** (Next.js or Vite + React): chat panel, live balance/portfolio card, policy and budget meter ("0.003 / 0.01 ETH today"), and an **approval card** for T2 with the reasons in plain English. Approve/Reject goes to the executor (replace `CliApprover` with a `WebApprover`).
-- [ ] B: audit timeline view showing each intent → decision → tx hash with explorer link and a green "chain intact" badge.
+- [x] B: **Web UI** (Next.js or Vite + React): chat panel, live balance/portfolio card, policy and budget meter ("0.003 / 0.01 ETH today"), and an **approval card** for T2 with the reasons in plain English. Approve/Reject goes to the executor (replace `CliApprover` with a `WebApprover`).
+- [x] B: audit timeline view showing each intent → decision → tx hash with explorer link and a green "chain intact" badge.
 - [ ] A: agent explains denials and proposes a compliant alternative automatically.
 
 ### Day 5 (Sat 17 Oct): challenge bonus

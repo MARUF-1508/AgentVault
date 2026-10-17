@@ -3,11 +3,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { normalize, sep } from 'node:path';
 import type OpenAI from 'openai';
+import { formatUnits } from 'viem';
 import { z } from 'zod';
 import { chatTurn } from '../agent/agent.js';
 import { runTool, type ToolContext } from '../agent/tools.js';
 import type { WebApprover } from '../approval/approver.js';
+import { can, permissionsOf, type Permission } from '../auth/rbac.js';
+import { LoginThrottle, Sessions, type User, type UserStore } from '../auth/users.js';
 import type { Env } from '../config.js';
+import { pauseWallet } from '../policy/killswitch.js';
+import { spendStateFrom } from '../policy/state.js';
 import { IntentSchema } from '../policy/types.js';
 
 export interface WebServerOptions {
@@ -16,6 +21,44 @@ export interface WebServerOptions {
   approver: WebApprover;
   /** Directory with the built UI (`web/dist`). Missing dir => JSON hint. */
   distDir?: string;
+  /** Set in VAULT=true mode, so the UI can show that on-chain caps apply. */
+  vault?: { address: `0x${string}` };
+  /** Web-UI accounts. Every /api route except login needs a session. */
+  users: UserStore;
+  sessions?: Sessions;
+}
+
+/** Which permission each API route needs. Anything not listed is 404. */
+const ROUTES: Record<string, Permission> = {
+  'GET /api/status': 'read',
+  'GET /api/budget': 'read',
+  'GET /api/info': 'read',
+  'GET /api/portfolio': 'read',
+  'GET /api/policy': 'read',
+  'GET /api/activity': 'read',
+  'GET /api/verify': 'read',
+  'GET /api/pending': 'read',
+  'POST /api/preview': 'preview',
+  'POST /api/transact': 'transact',
+  'POST /api/chat': 'chat',
+  'POST /api/decide': 'approve',
+  'POST /api/pause': 'pause',
+};
+
+const COOKIE = 'av_session';
+const LoginSchema = z.object({ username: z.string().min(1).max(32), password: z.string().min(1).max(200) });
+
+function cookieToken(req: IncomingMessage): string | undefined {
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === COOKIE) return v.join('=');
+  }
+  return undefined;
+}
+
+function setCookie(res: ServerResponse, token: string, maxAgeSec: number): void {
+  // HttpOnly: page scripts cannot read it. SameSite=Strict: other sites never send it.
+  res.setHeader('set-cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`);
 }
 
 const DecideSchema = z.object({ approved: z.boolean() });
@@ -27,6 +70,37 @@ const stringify = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'bi
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(stringify(body));
+}
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+function hostnameOf(value: string | undefined, withScheme: boolean): string | null {
+  if (!value) return null;
+  try {
+    return new URL(withScheme ? value : `http://${value}`).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Browser-facing guard for a server with no auth. A Host header that is not
+ * loopback means DNS rebinding; an Origin that is not loopback means another
+ * website is calling us. POSTs must be JSON, which forces a CORS preflight that
+ * this server never answers, so a cross-site form or no-cors fetch cannot
+ * approve a T2 or trigger a transaction.
+ */
+function rejectForeign(req: IncomingMessage): { status: number; error: string } | null {
+  const host = hostnameOf(req.headers.host, false);
+  if (!host || !LOOPBACK.has(host)) return { status: 403, error: 'Host must be loopback.' };
+  const origin = req.headers.origin;
+  if (origin !== undefined && !LOOPBACK.has(hostnameOf(origin, true) ?? '')) {
+    return { status: 403, error: 'Cross-origin requests are refused.' };
+  }
+  if (req.method === 'POST' && !(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+    return { status: 415, error: 'POST bodies must be application/json.' };
+  }
+  return null;
 }
 
 function readBody(req: IncomingMessage): Promise<unknown> {
@@ -72,12 +146,75 @@ const STATIC_TYPES: Record<string, string> = {
 export function createServer(opts: WebServerOptions): Server {
   const { env, ctx, approver } = opts;
   const distDir = opts.distDir ?? 'web/dist';
-  const sessions = new Map<string, OpenAI.Chat.Completions.ChatCompletionMessageParam[]>();
+  const vault = opts.vault;
+  const { users } = opts;
+  const sessions = opts.sessions ?? new Sessions();
+  const throttle = new LoginThrottle();
+  const chats = new Map<string, OpenAI.Chat.Completions.ChatCompletionMessageParam[]>();
 
   return createHttpServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost');
       const path = url.pathname;
+      const foreign = rejectForeign(req);
+      if (foreign) return send(res, foreign.status, { error: foreign.error });
+
+      if (req.method === 'POST' && path === '/api/auth/login') {
+        const parsed = LoginSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { username, password }.' });
+        const { username, password } = parsed.data;
+        if (throttle.blocked(username)) {
+          ctx.audit.append('access', { event: 'login', user: username, ok: false, reason: 'throttled' });
+          return send(res, 429, { error: 'Too many failed sign-ins. Try again in 15 minutes.' });
+        }
+        const user = users.verify(username, password);
+        ctx.audit.append('access', { event: 'login', user: username, ok: Boolean(user) });
+        if (!user) {
+          throttle.fail(username);
+          return send(res, 401, { error: 'Wrong username or password.' });
+        }
+        throttle.clear(username);
+        const { token, maxAgeSec } = sessions.create(user);
+        setCookie(res, token, maxAgeSec);
+        return send(res, 200, { user: user.username, role: user.role, permissions: permissionsOf(user.role) });
+      }
+      if (req.method === 'POST' && path === '/api/auth/logout') {
+        sessions.destroy(cookieToken(req));
+        setCookie(res, '', 0);
+        return send(res, 200, { ok: true });
+      }
+
+      const user: User | null = sessions.get(cookieToken(req));
+      if (req.method === 'GET' && path === '/api/auth/me') {
+        if (!user) return send(res, 401, { error: 'Not signed in.' });
+        return send(res, 200, { user: user.username, role: user.role, permissions: permissionsOf(user.role) });
+      }
+      const needs = ROUTES[`${req.method} ${path}`];
+      if (path.startsWith('/api/') && needs) {
+        if (!user) return send(res, 401, { error: 'Not signed in.' });
+        if (!can(user.role, needs)) return send(res, 403, { error: `Your role (${user.role}) cannot ${needs}.` });
+      }
+
+      if (req.method === 'GET' && path === '/api/status') {
+        const { chain, account } = ctx.clients;
+        return send(res, 200, {
+          address: account?.address ?? null,
+          chain: chain.name,
+          chainId: chain.id,
+          explorer: chain.blockExplorers?.default.url ?? null,
+          paused: spendStateFrom([], env.PAUSE_FILE).paused,
+          vault: vault?.address ?? null,
+          llm: Boolean(env.LLM_API_KEY),
+          model: env.LLM_API_KEY ? env.LLM_MODEL : null,
+        });
+      }
+      if (req.method === 'GET' && path === '/api/budget') {
+        return send(res, 200, budgetView(ctx, env.PAUSE_FILE));
+      }
+      if (req.method === 'POST' && path === '/api/pause') {
+        pauseWallet(env.PAUSE_FILE, ctx.audit, 'web', user!.username);
+        return send(res, 200, { paused: true });
+      }
 
       if (req.method === 'GET' && path === '/api/info') {
         return send(res, 200, await runTool('get_wallet_info', '{}', ctx));
@@ -96,12 +233,15 @@ export function createServer(opts: WebServerOptions): Server {
         return send(res, 200, ctx.audit.verify());
       }
       if (req.method === 'GET' && path === '/api/pending') {
-        return send(res, 200, { pending: approver.getPending() });
+        const detail = approver.getPendingDetail();
+        return send(res, 200, { pending: detail?.summary ?? null, expiresAt: detail?.expiresAt ?? null });
       }
       if (req.method === 'POST' && path === '/api/decide') {
         const parsed = DecideSchema.safeParse(await readBody(req));
         if (!parsed.success) return send(res, 400, { error: 'Body must be { approved: boolean }.' });
-        return send(res, 200, { decided: approver.decide(parsed.data.approved) });
+        const decided = approver.decide(parsed.data.approved);
+        if (decided) ctx.audit.append('access', { event: 'decide', user: user!.username, approved: parsed.data.approved });
+        return send(res, 200, { decided });
       }
       if (req.method === 'POST' && (path === '/api/preview' || path === '/api/transact')) {
         const parsed = TransactSchema.safeParse(await readBody(req));
@@ -129,10 +269,13 @@ export function createServer(opts: WebServerOptions): Server {
         if (!parsed.success) return send(res, 400, { error: 'Body must be { message, session? }.' });
         if (!env.LLM_API_KEY) return send(res, 400, { error: 'LLM_API_KEY is not set; chat needs a model endpoint.' });
         const session = parsed.data.session ?? randomUUID();
-        const history = sessions.get(session) ?? [];
-        const answer = await chatTurn(env, ctx, history, parsed.data.message);
-        sessions.set(session, history);
-        return send(res, 200, { session, answer });
+        // Histories are per user, so one account can never read another's chat.
+        const key = `${user!.username}:${session}`;
+        const history = chats.get(key) ?? [];
+        const events: string[] = [];
+        const answer = await chatTurn(env, ctx, history, parsed.data.message, (e) => events.push(e));
+        chats.set(key, history);
+        return send(res, 200, { session, answer, events });
       }
 
       if (req.method === 'GET') {
@@ -140,6 +283,12 @@ export function createServer(opts: WebServerOptions): Server {
         if (file) {
           res.writeHead(200, { 'content-type': file.type });
           return res.end(file.body);
+        }
+        // Client-side routes (/activity, /security, ...) all load the SPA shell.
+        const shell = !path.startsWith('/api/') && !path.includes('.') ? serveStatic(distDir, '/') : null;
+        if (shell) {
+          res.writeHead(200, { 'content-type': shell.type });
+          return res.end(shell.body);
         }
         if (path === '/' || !path.startsWith('/api/')) {
           return send(res, 404, { error: 'Web UI is not built. Run `npm run build` inside web/ and restart serve.' });
@@ -154,6 +303,28 @@ export function createServer(opts: WebServerOptions): Server {
       return send(res, 500, { error: message });
     }
   });
+}
+
+/** Today's spend per asset against its limits, rebuilt from the audit log. */
+function budgetView(ctx: ToolContext, pauseFile: string) {
+  const { policy } = ctx;
+  const state = spendStateFrom(ctx.audit.read(), pauseFile);
+  const assets = [
+    { asset: policy.native.symbol, decimals: 18, limits: policy.native },
+    ...Object.entries(policy.tokens).map(([asset, t]) => ({ asset, decimals: t.decimals, limits: t })),
+  ];
+  return {
+    paused: state.paused,
+    txLastHour: state.txLastHour,
+    maxTxPerHour: policy.rateLimit.maxTxPerHour,
+    assets: assets.map(({ asset, decimals, limits }) => ({
+      asset,
+      spentToday: formatUnits(state.spentToday[asset] ?? 0n, decimals),
+      dailyBudget: limits.dailyBudget,
+      autoMaxPerTx: limits.autoMaxPerTx,
+      hardMaxPerTx: limits.hardMaxPerTx,
+    })),
+  };
 }
 
 function serveStatic(distDir: string, path: string): { type: string; body: Buffer } | null {
