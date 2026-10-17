@@ -1,4 +1,5 @@
 import { RefreshCw } from 'lucide-react';
+import CountUp from 'react-countup';
 import { getPortfolio, type Budget } from '../api';
 import { useWallet } from '../data';
 import { pct, usePoll } from '../format';
@@ -50,7 +51,8 @@ export function Holdings() {
       {portfolio && (
         <>
           <p className="total">
-            ${portfolio.totalUsd} <span className="muted small">total, testnet value</span>
+            <CountUp end={Number(portfolio.totalUsd) || 0} prefix="$" decimals={2} separator="," duration={1.1} preserveValue />{' '}
+            <span className="muted small">total, testnet value</span>
           </p>
           {portfolio.holdings.length === 0 ? (
             <p className="muted">No balances yet. Without a wallet key the server runs read-only.</p>

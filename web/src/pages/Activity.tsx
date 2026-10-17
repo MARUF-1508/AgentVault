@@ -1,4 +1,5 @@
 import AuditTimeline from '../components/AuditTimeline';
+import Reveal from '../components/Reveal';
 import { usePageTitle } from '../format';
 
 export default function Activity() {
@@ -13,7 +14,9 @@ export default function Activity() {
           </p>
         </div>
       </div>
-      <AuditTimeline limit={50} />
+      <Reveal>
+        <AuditTimeline limit={50} />
+      </Reveal>
     </>
   );
 }

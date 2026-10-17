@@ -6,7 +6,7 @@ interface AuthValue {
   /** True until the first /api/auth/me answer arrives. */
   loading: boolean;
   can: (p: Permission) => boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<Me>;
   logout: () => Promise<void>;
 }
 
@@ -31,7 +31,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
-    setMe(await apiLogin(username, password));
+    const user = await apiLogin(username, password);
+    setMe(user);
+    return user;
   }, []);
 
   const logout = useCallback(async () => {

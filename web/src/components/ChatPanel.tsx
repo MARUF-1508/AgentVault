@@ -5,6 +5,7 @@ import { chat } from '../api';
 import { useWallet } from '../data';
 import { linkify } from '../format';
 import { speak, speechOutputSupported, useSpeechInput } from '../voice';
+import Markdown from './Markdown';
 
 interface Msg {
   from: 'you' | 'agent' | 'error';
@@ -166,7 +167,8 @@ export default function ChatPanel() {
                 </details>
               )}
               <div className="text">
-                {m.voice && <Mic size={12} className="voice-tag" aria-label="Spoken" />} {linkify(m.text, status?.explorer ?? null)}
+                {m.voice && <Mic size={12} className="voice-tag" aria-label="Spoken" />}{' '}
+                {m.from === 'agent' ? <Markdown text={m.text} explorer={status?.explorer ?? null} /> : linkify(m.text, status?.explorer ?? null)}
               </div>
             </motion.div>
           ))}

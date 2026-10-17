@@ -56,7 +56,19 @@ export interface ActivityEntry {
 }
 
 export type Role = 'viewer' | 'operator' | 'owner';
-export type Permission = 'read' | 'preview' | 'transact' | 'chat' | 'approve' | 'pause';
+export type Permission = 'read' | 'preview' | 'transact' | 'chat' | 'approve' | 'pause' | 'admin';
+
+export interface UserAccount {
+  username: string;
+  role: Role;
+}
+
+export interface NewAccount {
+  username: string;
+  role: Role;
+  /** Shown exactly once, when the account is created. */
+  password: string;
+}
 
 export interface Me {
   user: string;
@@ -100,8 +112,14 @@ async function read<T>(path: string): Promise<T> {
 const post = <T>(path: string, body: unknown) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
 export const getMe = () => api<Me>('/api/auth/me');
+/** Public: true when the store has no accounts yet (first-run setup screen). */
+export const getSetupNeeded = () => api<{ needed: boolean }>('/api/auth/setup');
+export const setup = (username: string, password: string) => post<Me>('/api/auth/setup', { username, password });
 export const login = (username: string, password: string) => post<Me>('/api/auth/login', { username, password });
 export const logout = () => post<{ ok: boolean }>('/api/auth/logout', {});
+export const getUsers = () => read<{ users: UserAccount[]; you: string }>('/api/users');
+export const addUser = (username: string, role: Role) => post<NewAccount>('/api/users', { username, role });
+export const removeUser = (username: string) => post<{ removed: boolean }>('/api/users/remove', { username });
 export const getStatus = () => read<Status>('/api/status');
 export const getPortfolio = () => read<Portfolio>('/api/portfolio');
 export const getPolicy = () => read<Policy>('/api/policy');
