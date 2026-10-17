@@ -55,6 +55,7 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | Browser hardening: CSP (same-origin scripts, one hash-pinned inline snippet), `nosniff`, `no-referrer`, `X-Frame-Options: DENY` on every response; audit trail exports as CSV for review (`GET /api/audit/export`, read permission) | ✅ |
 | x402-style paid API: request origin pinned to `X402_API_URL` (SSRF guard), `402` requirements zod-validated, the payment is a normal `native_transfer` intent through the executor (T1/T2/T3 apply), fetched text treated as untrusted | ✅ |
 | Containerized deployment publishes on the host loopback only (`127.0.0.1:8787`); `.env` excluded from the image; `config/` mounted read-only | ✅ |
+| Static analysis: Slither 0.11.6 on `contracts/AgentVault.sol` — **0 high/medium** findings, 8 informational (dispositions in §5) | ✅ |
 
 ## 4. Known-risk list
 
@@ -77,3 +78,23 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | R15 | Spoken commands are misheard | Medium | Wrong amount or recipient requested | Voice only types into the chat; the request still goes through the policy engine, and every T2 shows the full details and needs an owner's click | A misheard T1 within the auto limit to an allowlisted recipient can execute |
 | R16 | In `VAULT=true` mode only native ETH is routed through AgentVault; ERC-20 transfers still come from the agent EOA, so on-chain caps do not cover tokens | Medium | A stolen key could move tokens beyond the daily budget (bounded by the token balance and the off-chain policy) | Off-chain token limits, allowlist, budgets and simulation still gate every transfer; keep token balances in the agent wallet small in vault deployments; the agent path always goes through the policy engine | Roadmap: a token-aware vault (`agentSendToken`) that re-enforces caps for ERC-20 |
 | R17 | Content fetched from the x402 paid API is attacker-controlled text | Low | Attempted prompt injection from paid data | Delivered to the model as `<untrusted>` data like every tool result; the payment itself is policy-gated; fake `402` fields are rejected by the zod schema | Same residual as R2 (a human could still be socially engineered) |
+
+## 5. Static analysis (Slither)
+
+Run on the frozen, deployed contract (no redeploy — the deployed bytecode and
+the source in `contracts/AgentVault.sol` stay identical):
+
+```bash
+python3 -m venv /tmp/slither && /tmp/slither/bin/pip install slither-analyzer
+slither . --filter-paths "lib|test|script"     # Slither 0.11.6
+# 8 results, all informational; 0 high / 0 medium
+```
+
+| Finding | Slither severity | Disposition |
+|---|---|---|
+| `missing-zero-check` — constructor `_agent` and `setAgent(a)` accept `address(0)` | Low/informational | Accepted. Setting a zero agent only disables the agent path (`msg.sender != agent` can never pass); owner can fix with `setAgent`. The contract is frozen post-deploy to keep evidence hashes valid. |
+| `reentrancy-events` — `AgentSpend` emitted after `to.call` | Informational | Accepted. State (`spentToday`) is updated **before** the external call (checks-effects-interactions); a reentrant call is rejected by `msg.sender != agent`. Only the event ordering is flagged. |
+| `timestamp` — `block.timestamp` in the daily-window comparison | Informational | Accepted. The ±few-seconds drift a validator can introduce is irrelevant at a 0.01 ETH/day scale; there is no randomness or payout based on exact time. |
+| `low-level-calls` — `to.call{value}` and `owner.call{value}` | Informational | Accepted. Both check the success flag and revert with `TransferFailed`; low-level call is required to pay arbitrary EOA recipients. |
+| `naming-convention` — `_maxPerTx`, `_dailyLimit` params | Informational | Accepted, cosmetic (leading-underscore parameters). |
+| `solc-version pragma` aggregate note and misc. info | Informational | `pragma solidity ^0.8.24`; built by Foundry with the pinned solc in `foundry.toml`. |
