@@ -35,7 +35,8 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | Re-check policy after human approval (TOCTOU) | ✅ |
 | Hash-chained tamper-evident audit log | ✅ |
 | Budget derived from the audit log; failed txs still count | ✅ |
-| Kill switch (`pause`) | ✅ |
+| Kill switch (`pause`); the web UI can pause but only the CLI can resume, and both are audit-logged | ✅ |
+| Web server refuses foreign `Host`/`Origin` and non-JSON POSTs (no cross-site approval or transfer); unanswered T2 approvals auto-reject after two minutes | ✅ |
 | Mainnet refused unless explicitly enabled | ✅ |
 | Key never printed; `.env` chmod 600 and git-ignored | ✅ |
 | Unlimited ERC-20 approvals forbidden | ✅ |
@@ -65,4 +66,4 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | R11 | Address-poisoning detection is a heuristic (matching leading/trailing hex digits), so a carefully crafted near-miss could evade it | Low | Funds to a lookalike | New (non-allowlisted) recipients are still T2, so a human sees the full address before approving | Social engineering of the human remains |
 | R12 | The anomaly guard uses the same price source as the portfolio; a missing or manipulated price disables or skews it | Low | A large request slips the guard | Hard caps and daily budgets always apply; prices are labelled (`chainlink`/`fixed-testnet-table`) and the guard is off only when a price is genuinely missing | On mainnet, oracle manipulation is a real residual |
 | R13 | The local block list is static and cannot know a brand-new scam address | Medium | Interaction with a fresh scam | New recipients are T2; block list + denylist raise known-bad addresses to T3 immediately | Inherent to any local list |
-| R14 | The web UI server has no authentication | Low (loopback-only) | Anyone on the machine could approve a T2 or chat with the agent's key | Binds 127.0.0.1 only; README warns never to expose it; CLI remains the hardened path | Do not host the UI; add auth before any shared deployment |
+| R14 | The web UI server has no authentication | Low (loopback-only) | Anyone on the machine could approve a T2 or chat with the agent's key | Binds 127.0.0.1 only; refuses non-loopback `Host` and `Origin` and non-JSON POSTs, so other websites in the same browser cannot drive it (`test/web.test.ts`); README warns never to expose it; CLI remains the hardened path | Local processes and other loopback origins can still call it; add auth before any shared deployment |

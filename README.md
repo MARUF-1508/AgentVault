@@ -98,10 +98,13 @@ cd web && npm install && npm run build
 cd .. && npm run cli -- serve          # http://127.0.0.1:5174
 ```
 
-Chat panel, portfolio card with budget limits, a T2 approval card (Approve/Reject
-resolves the same executor queue as the CLI), and an audit timeline with a chain-
-integrity badge. The server binds loopback only and has no auth: a local demo,
-never expose it. See `web/README.md`.
+Chat with suggested demo prompts and the agent's tool calls, a portfolio card
+with today's spend against each budget, a policy-check panel that shows a
+transfer's tier without the LLM, a T2 approval dialog (Approve/Reject resolves
+the same executor queue as the CLI, and an unanswered request is rejected after
+two minutes), a pause button for the kill switch, and an audit trail with
+explorer links and a chain-integrity badge. The server binds loopback only and
+has no auth: a local demo, never expose it. See `web/README.md`.
 
 ### On-chain vault mode
 
