@@ -29,6 +29,7 @@ export interface Status {
   explorer: string | null;
   paused: boolean;
   vault: string | null;
+  policyHash: string | null;
   llm: boolean;
   model: string | null;
 }

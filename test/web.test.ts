@@ -10,7 +10,7 @@ import type { Env } from '../src/config.js';
 import type { Executor } from '../src/executor/executor.js';
 import { PolicySchema } from '../src/policy/types.js';
 import { UserStore } from '../src/auth/users.js';
-import { createServer } from '../src/web/server.js';
+import { createServer, inlineScriptHashes } from '../src/web/server.js';
 import { request, type Server } from 'node:http';
 
 const policy = PolicySchema.parse({
@@ -102,7 +102,7 @@ describe('web server', () => {
   });
 
   it('needs a session for every API route, and the cookie is HttpOnly and SameSite=Strict', async () => {
-    for (const path of ['/api/status', '/api/pending', '/api/portfolio', '/api/auth/me']) {
+    for (const path of ['/api/status', '/api/pending', '/api/portfolio', '/api/stats', '/api/audit/export', '/api/auth/me']) {
       expect((await fetch(`${base}${path}`)).status).toBe(401);
     }
     const r = await fetch(`${base}/api/auth/login`, {
@@ -290,5 +290,64 @@ describe('web server', () => {
     expect(root.status).toBe(404);
     const missing = await authed(`${base}/api/nope`);
     expect(missing.status).toBe(404);
+  });
+});
+
+describe('hardening headers, policy hash and CSV export', () => {
+  let server: Server;
+  let base = '';
+  let cookie = '';
+  // Own users file: the first suite deletes its temp dir when it finishes.
+  const dir2 = mkdtempSync(join(tmpdir(), 'aw-users-'));
+  const users2 = new UserStore(join(dir2, 'users.json'));
+  const ownerPassword = users2.add('olivia', 'owner');
+
+  beforeAll(async () => {
+    const { ctx, approver } = stubCtx({});
+    server = createServer({ env, ctx, approver, users: users2, distDir: '/nonexistent-dist' });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    cookie = await login(base, 'olivia', ownerPassword);
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it('sets hardening headers on every API response, including errors', async () => {
+    for (const path of ['/api/status', '/api/nope']) {
+      const r = await fetch(`${base}${path}`, { headers: { cookie } });
+      expect(r.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(r.headers.get('x-frame-options')).toBe('DENY');
+      expect(r.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(r.headers.get('content-security-policy')).toContain("default-src 'self'");
+    }
+  });
+
+  it('never allows inline scripts unless their hash is in the CSP', async () => {
+    const html = '<script>var t=1</script><script src="/src/main.tsx"></script>';
+    const hashes = inlineScriptHashes(html);
+    expect(hashes).toHaveLength(1);
+    expect(hashes[0]).toMatch(/^'sha256-[A-Za-z0-9+/=]+'$/);
+    expect(inlineScriptHashes('<script src="/x.js"></script>')).toEqual([]);
+    const r = await fetch(`${base}/api/status`, { headers: { cookie } });
+    const csp = r.headers.get('content-security-policy')!;
+    expect(csp).not.toContain("'unsafe-inline' 'self'");
+    expect(csp).toMatch(/script-src 'self'/);
+  });
+
+  it('exposes the policy file hash in /api/status', async () => {
+    const status = (await (await fetch(`${base}/api/status`, { headers: { cookie } })).json()) as { policyHash?: string };
+    expect(status.policyHash).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('exports the audit log as CSV for signed-in readers only', async () => {
+    expect((await fetch(`${base}/api/audit/export`)).status).toBe(401);
+    const r = await fetch(`${base}/api/audit/export`, { headers: { cookie } });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toBe('text/csv; charset=utf-8');
+    expect(r.headers.get('content-disposition')).toContain('agentvault-audit.csv');
+    expect((await r.text()).split('\n')[0]).toBe('seq,ts,type,data');
   });
 });

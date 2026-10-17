@@ -133,6 +133,12 @@ export default function ApprovalModal() {
               <dd>{(f.Action ?? '').replace(/_/g, ' ')}</dd>
               <dt>Amount</dt>
               <dd className="amount">{f.Amount}</dd>
+              {f.Effect && (
+                <>
+                  <dt>Effect</dt>
+                  <dd className="effect">{f.Effect}</dd>
+                </>
+              )}
               <dt>Target</dt>
               <dd>
                 <AddressBlocks value={f.Target ?? ''} />
@@ -149,6 +155,12 @@ export default function ApprovalModal() {
                 <>
                   <dt>Min out</dt>
                   <dd>{f['Min out']}</dd>
+                </>
+              )}
+              {f.Gas && (
+                <>
+                  <dt>Gas</dt>
+                  <dd className="muted small">{f.Gas}</dd>
                 </>
               )}
               <dt>Chain</dt>

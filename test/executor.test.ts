@@ -49,6 +49,38 @@ function harness(vault?: { address: `0x${string}` }) {
   return { executor, sent };
 }
 
+const T2 = { tier: 'T2_CONFIRM' as const, reasons: ['new recipient'], amountBase: 500000000000000n, asset: 'ETH' };
+
+describe('approval card', () => {
+  it('states the exact balance effect and the estimated gas fee', () => {
+    const { executor } = harness();
+    const text = executor.describe({ kind: 'native_transfer', to: ALICE, amount: '0.0005' }, T2, {
+      gas: 21000n,
+      gasFee: 21000000000000n,
+    });
+    expect(text).toContain(`Effect : -0.0005 ETH from the wallet, +0.0005 ETH to ${ALICE}`);
+    expect(text).toContain('Gas    : 21000 units (estimated fee ~0.000021 ETH)');
+  });
+
+  it('names the vault as the source when vault mode is on', () => {
+    const { executor } = harness({ address: VAULT });
+    const text = executor.describe({ kind: 'native_transfer', to: ALICE, amount: '0.0005' }, T2);
+    expect(text).toContain(`Effect : -0.0005 ETH from AgentVault, +0.0005 ETH to ${ALICE}`);
+    expect(text).not.toContain('Gas    :');
+  });
+
+  it('spells out an allowance grant instead of pretending it is a transfer', () => {
+    const { executor } = harness();
+    const spender = '0x3333333333333333333333333333333333333333';
+    const text = executor.describe(
+      { kind: 'erc20_approve', token: '0x4444444444444444444444444444444444444444', spender, amount: '5' },
+      { tier: 'T2_CONFIRM', reasons: ['allowance above the auto limit'], amountBase: 5000000n, asset: 'USDC' },
+    );
+    expect(text).toContain(`Effect : Allowance: ${spender} may spend up to 5 USDC (replaces the current allowance)`);
+    expect(text).not.toContain('-5 USDC');
+  });
+});
+
 describe('vault routing (VAULT=true)', () => {
   it('routes a T1 native transfer through agentSend with zero value', async () => {
     const { executor, sent } = harness({ address: VAULT });

@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { normalize, sep } from 'node:path';
+import { join, normalize, sep } from 'node:path';
 import type OpenAI from 'openai';
 import { formatUnits } from 'viem';
 import { z } from 'zod';
@@ -38,6 +38,7 @@ const ROUTES: Record<string, Permission> = {
   'GET /api/policy': 'read',
   'GET /api/activity': 'read',
   'GET /api/stats': 'read',
+  'GET /api/audit/export': 'read',
   'GET /api/verify': 'read',
   'GET /api/pending': 'read',
   'GET /api/users': 'admin',
@@ -49,6 +50,28 @@ const ROUTES: Record<string, Permission> = {
   'POST /api/decide': 'approve',
   'POST /api/pause': 'pause',
 };
+
+/** First 16 hex chars of the policy file's sha256, shown in the UI. */
+function policyHashOf(path: string): string | null {
+  try {
+    return createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * sha256 hashes of inline <script> blocks, for the CSP. The built index.html
+ * carries one inline theme script, so allowing hashes keeps script-src at 'self'.
+ */
+export function inlineScriptHashes(html: string): string[] {
+  const out: string[] = [];
+  const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g;
+  for (const m of html.matchAll(re)) {
+    if (m[1]?.trim()) out.push(`'sha256-${createHash('sha256').update(m[1]).digest('base64')}'`);
+  }
+  return out;
+}
 
 const COOKIE = 'av_session';
 const LoginSchema = z.object({ username: z.string().min(1).max(32), password: z.string().min(1).max(200) });
@@ -159,9 +182,35 @@ export function createServer(opts: WebServerOptions): Server {
   const sessions = opts.sessions ?? new Sessions();
   const throttle = new LoginThrottle();
   const chats = new Map<string, OpenAI.Chat.Completions.ChatCompletionMessageParam[]>();
+  const policyHash = policyHashOf(env.POLICY_FILE);
+
+  // Strict CSP; the one inline script (pre-paint theme pick) is hash-allowed.
+  let scriptSrc = "'self'";
+  try {
+    const hashes = inlineScriptHashes(readFileSync(join(distDir, 'index.html'), 'utf8'));
+    if (hashes.length) scriptSrc += ` ${hashes.join(' ')}`;
+  } catch {
+    // UI not built yet; 'self' alone is fine.
+  }
+  const csp = [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "font-src 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ');
 
   return createHttpServer(async (req, res) => {
     try {
+      res.setHeader('x-content-type-options', 'nosniff');
+      res.setHeader('referrer-policy', 'no-referrer');
+      res.setHeader('x-frame-options', 'DENY');
+      res.setHeader('content-security-policy', csp);
       const url = new URL(req.url ?? '/', 'http://localhost');
       const path = url.pathname;
       const foreign = rejectForeign(req);
@@ -227,6 +276,7 @@ export function createServer(opts: WebServerOptions): Server {
           explorer: chain.blockExplorers?.default.url ?? null,
           paused: spendStateFrom([], env.PAUSE_FILE).paused,
           vault: vault?.address ?? null,
+          policyHash,
           llm: Boolean(env.LLM_API_KEY),
           model: env.LLM_API_KEY ? env.LLM_MODEL : null,
         });
@@ -284,6 +334,16 @@ export function createServer(opts: WebServerOptions): Server {
       }
       if (req.method === 'GET' && path === '/api/stats') {
         return send(res, 200, dailyStats(ctx.audit.read()));
+      }
+      if (req.method === 'GET' && path === '/api/audit/export') {
+        const csvEscape = (v: unknown) => `"${String(v).replace(/"/g, '""')}"`;
+        const rows = ctx.audit.read().map((e) => [e.seq, e.ts, e.type, csvEscape(stringify(e.data))].join(','));
+        const csv = ['seq,ts,type,data', ...rows].join('\n') + '\n';
+        res.writeHead(200, {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': 'attachment; filename="agentvault-audit.csv"',
+        });
+        return res.end(csv);
       }
       if (req.method === 'GET' && path === '/api/verify') {
         return send(res, 200, ctx.audit.verify());

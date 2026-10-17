@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Ban, CheckCircle2, Eye, Hand, Landmark } from 'lucide-react';
+import { Ban, CheckCircle2, Eye, Fingerprint, Hand, Landmark } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useAuth } from '../auth';
 import { useWallet } from '../data';
@@ -135,6 +135,23 @@ export default function Security() {
             </table>
           </div>
           <p className="muted small">The server checks the role on every request; hiding buttons is only a convenience. The last row is CLI-only for everyone.</p>
+        </section>
+
+        <section className="card">
+          <h2 className="row">
+            <Fingerprint size={18} aria-hidden /> Policy fingerprint
+          </h2>
+          {status?.policyHash ? (
+            <p>
+              <span className="mono">{status.policyHash}</span>
+              <br />
+              <span className="muted small">
+                sha256 of <code>config/policy.json</code> as loaded by the server. If this hash changes, the limits changed — compare it against the audit trail.
+              </span>
+            </p>
+          ) : (
+            <p className="muted">Policy file hash unavailable.</p>
+          )}
         </section>
 
         <section className="card">

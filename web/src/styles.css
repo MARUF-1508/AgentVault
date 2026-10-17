@@ -304,6 +304,7 @@ th.mine { color: var(--accent-2); }
 .fields dt { color: var(--muted); font-size: 0.8rem; padding-top: 0.1rem; }
 .fields dd { margin: 0; overflow-wrap: anywhere; }
 .fields .amount { font-size: 1.2rem; font-weight: 700; }
+.fields .effect { color: var(--accent); }
 .addr-blocks { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; }
 .addr-blocks .addr-edge { font-weight: 700; color: var(--warn); }
 .countdown { display: grid; gap: 0.25rem; margin: 0.75rem 0; }

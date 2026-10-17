@@ -99,6 +99,38 @@ contract AgentVaultTest is Test {
         assertEq(address(vault).balance, 1.1 ether);
     }
 
+    /// @notice Fuzz: for any three send attempts, no sequence can push the vault
+    /// past its daily limit; what recipients received always equals spentToday.
+    function testFuzz_budgetCannotBeExceededByAnySequence(uint96 a, uint96 b, uint96 c) public {
+        uint256[3] memory attempts = [uint256(a), uint256(b), uint256(c)];
+        uint256 received;
+
+        for (uint256 i = 0; i < attempts.length; i++) {
+            // Mix of below-cap, exactly-at-cap and above-cap amounts.
+            uint256 amount = attempts[i] % (MAX_PER_TX + 0.0005 ether);
+            uint256 before = ALICE.balance;
+            vm.prank(AGENT);
+            try vault.agentSend(payable(ALICE), amount) {
+                received += ALICE.balance - before;
+            } catch {}
+        }
+
+        assertLe(vault.spentToday(), DAILY_LIMIT);
+        assertEq(vault.spentToday(), received);
+        assertEq(ALICE.balance, received);
+        assertEq(address(vault).balance, 1 ether - received);
+    }
+
+    /// @notice Fuzz: a fully compromised agent key still cannot pay a recipient
+    /// that was never allowlisted.
+    function testFuzz_recipientMustBeAllowlisted(address who, uint96 amount) public {
+        vm.assume(who != ALICE);
+        uint256 sendAmount = uint256(amount) % (MAX_PER_TX + 1);
+        vm.prank(AGENT);
+        vm.expectRevert(AgentVault.RecipientNotAllowed.selector);
+        vault.agentSend(payable(who), sendAmount);
+    }
+
     // The test contract is the vault owner, so it must accept the ETH that
     // `withdraw` sends it; without this, the withdraw reverts with TransferFailed.
     receive() external payable {}

@@ -1,4 +1,4 @@
-import { encodeFunctionData, erc20Abi, maxUint256, parseUnits, type Hex } from 'viem';
+import { encodeFunctionData, erc20Abi, formatEther, maxUint256, parseUnits, type Hex } from 'viem';
 import type { Approver } from '../approval/approver.js';
 import type { AuditLog } from '../audit/log.js';
 import { explorerTx, type Clients } from '../chain/client.js';
@@ -128,9 +128,17 @@ export class Executor {
     const req = this.buildTx(intent, decision);
 
     // Simulate before asking a human, so we never ask them to approve something that would revert.
+    let gasFee: bigint | undefined;
+    let gas = 0n;
     try {
       await publicClient.call({ account, to: req.to, value: req.value, data: req.data });
-      const gas = await publicClient.estimateGas({ account, to: req.to, value: req.value, data: req.data });
+      gas = await publicClient.estimateGas({ account, to: req.to, value: req.value, data: req.data });
+      // Best-effort: the estimated fee goes on the human approval card.
+      try {
+        gasFee = gas * (await publicClient.getGasPrice());
+      } catch {
+        gasFee = undefined;
+      }
       this.audit.append('simulation', { ok: true, gas });
     } catch (err) {
       const msg = shortError(err);
@@ -141,7 +149,7 @@ export class Executor {
     if (opts.dryRun) return { status: 'dry_run', decision };
 
     if (decision.tier === 'T2_CONFIRM') {
-      const ok = await this.approver.confirm(this.describe(intent, decision));
+      const ok = await this.approver.confirm(this.describe(intent, decision, { gas, gasFee }));
       this.audit.append('approval', { approved: ok, by: 'human' });
       if (!ok) return { status: 'rejected_by_human', decision };
     }
@@ -243,7 +251,28 @@ export class Executor {
     };
   }
 
-  describe(intent: Intent, d: Decision): string {
+  /**
+   * Plain-language balance effect of the simulated transaction, for the human
+   * approval card. Derived from the intent itself (we built it), never from the
+   * model, so approving "what the card says" means approving what will execute.
+   */
+  effectLine(intent: Intent, d: Decision): string | null {
+    const symbol = this.policy.native.symbol;
+    if (intent.kind === 'native_transfer') {
+      return this.vault
+        ? `-${intent.amount} ${symbol} from AgentVault, +${intent.amount} ${symbol} to ${intent.to}`
+        : `-${intent.amount} ${symbol} from the wallet, +${intent.amount} ${symbol} to ${intent.to}`;
+    }
+    if (intent.kind === 'erc20_transfer') {
+      return `-${intent.amount} ${d.asset} from the wallet, +${intent.amount} ${d.asset} to ${intent.to}`;
+    }
+    if (intent.kind === 'erc20_approve') {
+      return `Allowance: ${intent.spender} may spend up to ${intent.amount} ${d.asset} (replaces the current allowance)`;
+    }
+    return null;
+  }
+
+  describe(intent: Intent, d: Decision, sim?: { gas?: bigint; gasFee?: bigint }): string {
     const amt = intent.kind === 'swap' ? intent.amountIn : intent.amount;
     const target =
       intent.kind === 'erc20_approve'
@@ -256,11 +285,17 @@ export class Executor {
       `  Amount : ${amt} ${intent.kind === 'swap' ? '' : d.asset}`.trimEnd(),
       `  Target : ${target}`,
     ];
+    const effect = this.effectLine(intent, d);
+    if (effect) lines.push(`  Effect : ${effect}`);
     if (intent.kind === 'native_transfer' && this.vault) {
       lines.push(`  Via    : AgentVault ${this.vault.address} (on-chain caps apply)`);
     }
     if (intent.kind === 'swap' && d.minAmountOut !== undefined) {
       lines.push(`  Min out: ${d.minAmountOut} (base units of ${intent.tokenOut})`);
+    }
+    if (sim?.gas !== undefined) {
+      const fee = sim.gasFee !== undefined ? ` (estimated fee ~${formatEther(sim.gasFee)} ${this.policy.native.symbol})` : '';
+      lines.push(`  Gas    : ${sim.gas} units${fee}`);
     }
     lines.push(
       `  Chain  : ${this.clients.chain.name} (${this.clients.chain.id})`,
