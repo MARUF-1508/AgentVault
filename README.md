@@ -6,9 +6,25 @@ An AI wallet agent that autonomously executes on-chain operations (asset managem
 
 **Core idea:** the LLM *plans*, a pure-function policy engine *decides*, the chain *enforces*.
 
+```mermaid
+flowchart LR
+  U[You / web UI] -->|natural language| A[LLM agent loop]
+  A -->|tool call| T[tools.ts<br/>zod validation]
+  T --> I[Intent]
+  I --> P{policy/engine.ts<br/>pure function}
+  P -->|T0 read| R[result]
+  P -->|T1 auto| X
+  P -->|T2 confirm| H[human approval<br/>CLI / web card]
+  H --> X
+  P -->|T3 deny| D[denial + reasons<br/>+ alternative]
+  X[executor.ts<br/>simulate → sign] --> C[(Base Sepolia)]
+  X --> L[(audit.jsonl<br/>hash-chained)]
+  C -.->|caps re-enforced<br/>in VAULT mode| V[AgentVault.sol]
+  X -.-> R
 ```
-you ─▶ LLM agent ─▶ tool (zod-validated) ─▶ policy engine ─▶ simulate ─▶ [human approve if T2] ─▶ sign ─▶ chain ─▶ audit log
-```
+
+The LLM has **no tool** that can change the policy, limits, allowlists or the
+kill switch, and only `executor.ts` holds the signing client.
 
 | Tier | Meaning | Example |
 |---|---|---|
@@ -30,7 +46,7 @@ you ─▶ LLM agent ─▶ tool (zod-validated) ─▶ policy engine ─▶ sim
 git clone <your-repo-url> agent-wallet
 cd agent-wallet
 npm install
-npm test            # 99 tests, no network needed
+npm test            # 162 tests, no network needed
 ```
 
 ### 2. Create the agent's testnet wallet
@@ -58,6 +74,14 @@ LLM_MODEL=gpt-4o-mini                    # any model with tool calling
 ### 5. Set your policy
 Edit `config/policy.json`. Add the addresses you trust to `recipients.allowlist` (label → address). Limits are human-readable decimal strings.
 
+### 6. Or run it with Docker (one command)
+```bash
+docker compose up --build     # UI on http://127.0.0.1:8787 (loopback only)
+```
+The port is published on the host's loopback only; `./data` (accounts, audit
+log) persists across restarts and `./config` is mounted read-only. `.env` is
+never baked into the image — pass it with `env_file` (already wired, optional).
+
 ---
 
 ## Usage
@@ -80,7 +104,11 @@ npm run cli -- audit                               # last 20 audit entries
 npm run cli -- audit verify                        # detect tampering
 npm run cli -- serve [--port N]                    # web UI on http://127.0.0.1:5174 (loopback only, sign-in)
 npm run cli -- user add <name> <role>               # web UI account: owner | operator | viewer
+npm run cli -- x402 <resource>                     # paid API demo: pay + fetch (needs X402_API_URL)
 npm run evidence                                   # docs/EXECUTION_EVIDENCE.md with tx hashes
+npm run e2e                                        # Playwright smoke: setup → dashboard → T1 preview
+npm run coverage                                   # vitest + v8 coverage report
+npm run x402:api                                   # start the demo paid API (FREE_MARKET_API)
 ```
 
 Example chat:
@@ -107,7 +135,11 @@ A multipage app (Dashboard, Agent, Transfer, Activity, Security, Settings) with
 a blue light and dark theme. It has sign-in with role-based access, chat with
 push-to-talk voice input and spoken replies, a tier preview that works without
 the LLM, and a T2 approval dialog that only owners can answer. An unanswered
-approval is rejected after two minutes. There is also a pause button and an
+approval is rejected after two minutes. Owners can enable TOTP two-factor
+(Settings → Security, with QR code and "sign out all devices"); sessions
+expire after 30 idle minutes. The Security page shows the sha256 fingerprint
+of the live policy file, Activity can export the audit trail as CSV, and a T2
+request raises a desktop notification. There is also a pause button and an
 audit trail with explorer links. The server binds loopback only; never expose
 it. See `web/README.md`.
 
@@ -136,22 +168,29 @@ OpenAI-compatible LLM tier, Foundry, Vite.
 **Zero-key path (2 minutes, no wallet, no LLM key):**
 
 ```bash
-npm install && npm test                # 99 unit tests, offline
+npm install && npm test                # 162 unit tests, offline
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 0.0002   # T1 verdict, nothing sent
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1        # T3 verdict + reasons
 npm run cli -- audit verify             # tamper check (empty log reads intact)
 cat docs/EXECUTION_EVIDENCE.md          # our real testnet hashes + vault reverts
-forge install foundry-rs/forge-std --no-commit && forge test   # 10 contract tests
+forge install foundry-rs/forge-std --no-commit && forge test   # 12 contract tests
 ```
 
 **Full signing path (about 5 minutes, still free):** follow Setup steps 2–5
 above (`npm run keygen`, fund from a Base Sepolia faucet, send 0.0001 ETH to an
-address you control). All demo amounts are tiny on purpose.
+address you control). All demo amounts are tiny on purpose. A ready-made
+5-minute walkthrough with expected outputs is in [`docs/DEMO.md`](docs/DEMO.md).
 
-**What maps to the scoring:** the demo script in
-`docs/IMPLEMENTATION_PLAN.md` §6 (10 scenarios → task/security/interaction),
-`docs/TECHNICAL.md` (architecture), `docs/SECURITY_SELF_ASSESSMENT.md`
-(tiers + known risks), `docs/EXECUTION_EVIDENCE.md` (tx hashes).
+**Submission map** (what to read for each scoring criterion):
+
+| Criterion | Where |
+|---|---|
+| Task completion (40%) | `docs/DEMO.md` (working flow), `src/agent/`, `src/policy/`, `src/executor/`; live hashes in `docs/EXECUTION_EVIDENCE.md` |
+| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, R1–R17), `test/` (162 unit + 12 Foundry), `contracts/AgentVault.sol` |
+| Innovation & interaction (30%) | Denial-with-alternative UX, tier preview without LLM, voice chat, approval cards, policy fingerprint, x402 paid-data flow, agent-wallet skill (`AGENTS.md`, `.opencode/`) |
+| On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls, vault-routing mode, x402 payment — all with tx hashes in `docs/EXECUTION_EVIDENCE.md` |
+| Architecture / technical doc | `docs/TECHNICAL.md` |
+| Evidence of real runs | `docs/EXECUTION_EVIDENCE.md` (regenerate: `npm run evidence`) |
 
 ---
 
@@ -178,18 +217,24 @@ src/
   risk/address.ts       contract-code, block-list and address-poisoning checks
   report/evidence.ts    renders docs/EXECUTION_EVIDENCE.md from the audit log
   web/server.ts         loopback-only demo server (same executor, WebApprover)
+  auth/users.ts         web accounts (scrypt, roles) + sessions
+  auth/totp.ts          RFC 6238 TOTP second factor (pure, clock-injected)
+  auth/rbac.ts          role → permission matrix
+  x402.ts               paid-API client: 402 schema, policy-gated payment
   schedule/rules.ts     scheduled / conditional rule schema + due calculation
   schedule/runner.ts    runs due rules through the executor
 contracts/AgentVault.sol  on-chain spending limits (challenge bonus)
 web/                    Vite + React UI: chat, portfolio, approval card, timeline
 script/DeployAgentVault.s.sol  Foundry deploy script
+scripts/                  keygen, evidence, x402 demo API
 foundry.toml              Foundry config (AgentVault tests + deploy)
 config/policy.json        limits, allowlists, swap router, prices, risk
 config/schedules.json     scheduled / conditional rules (user config)
-scripts/                  keygen, evidence
-test/                     vitest unit tests
-test/contracts/           Foundry tests for AgentVault
-  docs/                     plan, technical doc, security self-assessment, evidence
+test/                     vitest unit tests (19 files, 162 tests)
+test/contracts/           Foundry tests for AgentVault (12, incl. fuzzing)
+e2e/                      Playwright smoke tests (real server + built UI)
+Dockerfile, docker-compose.yml  one-command container (loopback publish)
+docs/                     plan, technical doc, demo script, security self-assessment, evidence
 ```
 
 ### Asset management: swaps and schedules
@@ -197,6 +242,7 @@ test/contracts/           Foundry tests for AgentVault
 - **Portfolio** (`get_portfolio` tool / `portfolio` command): every policy asset's balance with a USD value. Prices come from a Chainlink feed when one is configured in `policy.prices`, otherwise a clearly-labelled `fixed-testnet-table`. Read-only (T0).
 - **Swap** (`execute_swap` tool / `swap` command): a `swap` intent priced by the Uniswap v3 QuoterV2. The engine derives the on-chain minimum output from the quote and the slippage cap, refuses anything above `swap.maxSlippageBps`, and only ever calls the allowlisted router. A bounded approval (exactly `amountIn`, never unlimited) is sent first and only if the current allowance is short, and that approval is itself a policy-checked intent.
 - **Scheduled / conditional rules** (`config/schedules.json`): e.g. "send 1 USDC to Alice every Friday" or "move 50% to USDC if ETH drops 5%". Rules are user configuration (there is no LLM tool to write them); `npm run cli -- schedule run` turns each due rule into a normal `Intent` and runs it through the same executor. A rule that already fired today (per the audit log) is skipped. Rules ship disabled — enable them deliberately.
+- **Paid data over x402** (`fetch_paid_data` tool / `npm run cli -- x402 <resource>`): asks the paid API pinned by `X402_API_URL`; on a `402` response the payment requirements are zod-validated and paid as a **normal native-transfer intent through the policy engine** (tiers and budgets apply), then the resource is fetched and handed to the model as untrusted data. Run the demo API with `npm run x402:api`. Live payment hash in `docs/EXECUTION_EVIDENCE.md`.
 
 ### Risk controls
 
@@ -224,7 +270,7 @@ forge test                           # per-tx cap, daily reset, non-agent revert
 The vault is deployed by the **owner** (a key different from the agent's). With [Foundry](https://book.getfoundry.sh/):
 ```bash
 forge install foundry-rs/forge-std --no-commit   # once per clone (lib/ is git-ignored)
-forge test                                       # 10 contract tests, no network needed
+forge test                                       # 12 contract tests, no network needed
 export AGENT_ADDRESS=0x...                       # the agent's funded key
 export VAULT_MAX_PER_TX=500000000000000          # 0.0005 ether
 export VAULT_DAILY_LIMIT=10000000000000000       # 0.01 ether
@@ -239,6 +285,28 @@ forge create contracts/AgentVault.sol:AgentVault \
   --value 0.01ether \
   --constructor-args <AGENT_ADDRESS> 500000000000000 10000000000000000
 ```
+
+## Limitations (honest list)
+
+- **Testnet only.** Mainnet is refused by a guard in `src/chain/client.ts`; the agent key is a hot key in `.env`. Never fund it with real value.
+- **ERC-20 is not covered by the on-chain vault.** In `VAULT=true` mode only native ETH flows through `AgentVault`; token transfers come from the agent EOA, bounded by the off-chain policy only (known risk R16).
+- **Address-poisoning detection is a heuristic** (shared leading/trailing hex digits). It can be evaded by a crafted near-miss; new recipients are still T2, so a human sees the full address (R11).
+- **Budgets race under concurrency in theory.** The re-check before signing makes this small in the single-process CLI; a multi-writer deployment needs a lock (R6).
+- **The audit log is tamper-evident, not immutable.** Full deletion resets budgets; anchoring the head hash on-chain is future work (R4).
+- **No account abstraction.** The vault path uses a plain EOA with a capped contract; ERC-4337 session keys are roadmap.
+- **USDC and swaps depend on testnet liquidity** (Circle faucet, Uniswap v3 on Base Sepolia); quotes can be far from market (R10).
+- Full list with likelihood/impact/mitigation: `docs/SECURITY_SELF_ASSESSMENT.md` §4.
+
+## 中文速览 (Chinese quick look)
+
+Agent Vault 是一个运行在 **Base Sepolia 测试网**上的 AI 钱包代理：大模型只负责“规划”，
+一个纯函数策略引擎负责“决策”（T0 只读 / T1 自动 / T2 人工确认 / T3 拒绝），
+链上 `AgentVault` 合约作为最终兜底（私钥被盗也无法超过单日限额）。所有动作写入
+防篡改哈希链审计日志；策略、限额、白名单和急停开关对模型完全只读。
+
+快速开始：`npm install && npm test`（162 个离线测试）→ `npm run cli -- preview <地址> 0.0002`
+（查看 T1/T3 判定，不发交易）→ 按 README Setup 生成密钥并领测试币 → `npm run cli -- serve`
+打开本机网页界面（含 T2 审批卡与审计导出）。完整演示脚本见 `docs/DEMO.md`。
 
 ## Working on this with an AI coding agent
 `AGENTS.md` holds the project rules and `.opencode/skills/agent-wallet/SKILL.md` is an opencode skill with the workflow. opencode picks both up automatically when run from the repo root.

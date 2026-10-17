@@ -129,6 +129,14 @@ that writes schedules.
 - **One signing path.** `Executor.execute` is the only code that touches
   `walletClient.sendTransaction`, and it calls `evaluate` twice (before
   approval and immediately before signing). There is no back door.
+- **Signer isolation.** The private key is read in exactly one place,
+  `src/chain/client.ts` (`privateKeyToAccount`), and the resulting wallet
+  client is handed only to the `Executor`. The policy engine, the tool layer,
+  the agent loop and the web server never see it: they exchange `Intent`
+  objects and decisions. A grep for `privateKeyToAccount|sendTransaction`
+  over `src/` returns only those two files, which is itself checked when we
+  review changes. In `VAULT=true` mode the hot key cannot even reach the
+  funds' limits: `agentSend` calls are capped on-chain.
 - **Untrusted model output.** Every tool argument is zod-validated; tool
   results and all external strings (token names, memos, revert reasons) are
   wrapped as `<untrusted>` data and never concatenated into instructions.
@@ -147,7 +155,16 @@ that writes schedules.
   non-loopback `Host` (DNS rebinding), a non-loopback `Origin` (another
   website) and any POST that is not `application/json`, so a page in the
   same browser cannot approve a T2 or trigger a transfer. The UI can pause the
-  wallet but not resume it; resuming stays CLI-only.
+  wallet but not resume it; resuming stays CLI-only. Every response carries
+  hardening headers: a CSP that allows only same-origin scripts (plus one
+  hash-pinned bootstrap snippet, `src/web/server.ts`), `nosniff`,
+  `no-referrer` and `X-Frame-Options: DENY`. Sessions are HttpOnly/SameSite
+  with an 8 h absolute and 30 min idle limit; owners can enable TOTP 2FA
+  (RFC 6238, `src/auth/totp.ts`) and sign out all devices from Settings.
+- **Paid data, still gated.** `fetch_paid_data` (x402 demo) pins the API
+  origin to `X402_API_URL`, validates the `402` payment requirements with zod,
+  pays through the normal executor path (a `native_transfer` intent, T1/T2/T3
+  apply) and treats the fetched payload as untrusted data.
 - **Testnet only.** `chain.client.ts` refuses mainnet unless explicitly
   enabled; keys live in git-ignored `.env` (chmod 600) and are never printed,
   logged or committed. Unlimited approvals are forbidden by policy.
