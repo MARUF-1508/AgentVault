@@ -5,19 +5,22 @@
  * viewer   : read balances, policy, budgets and the audit trail.
  * operator : viewer + preview, submit transfers and chat with the agent.
  *            T2 transactions still wait for an owner's approval.
- * owner    : operator + approve/reject T2 and pause the wallet.
+ * owner    : operator + approve/reject T2, pause the wallet and manage web
+ *            accounts (admin). New accounts are never self-served: only an
+ *            owner can add one, and only the first owner can be created
+ *            during first-run setup.
  *
- * No role can change the policy or resume a paused wallet from the web.
+ * No role can change the policy, resume a paused wallet or touch keys.
  */
 export const ROLES = ['viewer', 'operator', 'owner'] as const;
 export type Role = (typeof ROLES)[number];
 
-export type Permission = 'read' | 'preview' | 'transact' | 'chat' | 'approve' | 'pause';
+export type Permission = 'read' | 'preview' | 'transact' | 'chat' | 'approve' | 'pause' | 'admin';
 
 const GRANTS: Record<Role, readonly Permission[]> = {
   viewer: ['read'],
   operator: ['read', 'preview', 'transact', 'chat'],
-  owner: ['read', 'preview', 'transact', 'chat', 'approve', 'pause'],
+  owner: ['read', 'preview', 'transact', 'chat', 'approve', 'pause', 'admin'],
 };
 
 export function can(role: Role, permission: Permission): boolean {

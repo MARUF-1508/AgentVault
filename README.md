@@ -99,8 +99,9 @@ cd web && npm install && npm run build
 cd .. && npm run cli -- serve          # http://127.0.0.1:5174
 ```
 
-On first start, `serve` creates an `owner` account and prints its password
-once. Add more accounts with `npm run cli -- user add <name> <owner|operator|viewer>`.
+On first start the UI shows a setup screen: create the first `owner` account and
+sign in. After that, owners add teammates with roles from Settings → Team (or
+the CLI: `npm run cli -- user add <name> <owner|operator|viewer>`).
 
 A multipage app (Dashboard, Agent, Transfer, Activity, Security, Settings) with
 a blue light and dark theme. It has sign-in with role-based access, chat with

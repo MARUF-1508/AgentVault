@@ -6,9 +6,10 @@ import { can, ROLES } from '../src/auth/rbac.js';
 import { LoginThrottle, Sessions, UserStore } from '../src/auth/users.js';
 
 describe('rbac', () => {
-  it('only an owner may approve or pause; a viewer may only read', () => {
+  it('only an owner may approve, pause or manage accounts; a viewer may only read', () => {
     expect(ROLES.filter((r) => can(r, 'approve'))).toEqual(['owner']);
     expect(ROLES.filter((r) => can(r, 'pause'))).toEqual(['owner']);
+    expect(ROLES.filter((r) => can(r, 'admin'))).toEqual(['owner']);
     expect(ROLES.filter((r) => can(r, 'transact'))).toEqual(['operator', 'owner']);
     expect(ROLES.every((r) => can(r, 'read'))).toBe(true);
     expect(can('viewer', 'chat')).toBe(false);
@@ -48,6 +49,17 @@ describe('Sessions and LoginThrottle', () => {
     expect(live.get(token)).toEqual({ username: 'a', role: 'viewer' });
     live.destroy(token);
     expect(live.get(token)).toBeNull();
+  });
+
+  it('destroyUser drops every session of one user and leaves others alone', () => {
+    const s = new Sessions();
+    const a1 = s.create({ username: 'a', role: 'owner' }).token;
+    const a2 = s.create({ username: 'a', role: 'owner' }).token;
+    const b = s.create({ username: 'b', role: 'viewer' }).token;
+    s.destroyUser('a');
+    expect(s.get(a1)).toBeNull();
+    expect(s.get(a2)).toBeNull();
+    expect(s.get(b)).toEqual({ username: 'b', role: 'viewer' });
   });
 
   it('blocks after max failures inside the window, then recovers', () => {

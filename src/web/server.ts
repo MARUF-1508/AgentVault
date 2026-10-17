@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { chatTurn } from '../agent/agent.js';
 import { runTool, type ToolContext } from '../agent/tools.js';
 import type { WebApprover } from '../approval/approver.js';
-import { can, permissionsOf, type Permission } from '../auth/rbac.js';
+import { can, permissionsOf, ROLES, type Permission } from '../auth/rbac.js';
 import { LoginThrottle, Sessions, type User, type UserStore } from '../auth/users.js';
 import type { Env } from '../config.js';
 import { pauseWallet } from '../policy/killswitch.js';
@@ -38,6 +38,9 @@ const ROUTES: Record<string, Permission> = {
   'GET /api/activity': 'read',
   'GET /api/verify': 'read',
   'GET /api/pending': 'read',
+  'GET /api/users': 'admin',
+  'POST /api/users': 'admin',
+  'POST /api/users/remove': 'admin',
   'POST /api/preview': 'preview',
   'POST /api/transact': 'transact',
   'POST /api/chat': 'chat',
@@ -47,6 +50,9 @@ const ROUTES: Record<string, Permission> = {
 
 const COOKIE = 'av_session';
 const LoginSchema = z.object({ username: z.string().min(1).max(32), password: z.string().min(1).max(200) });
+const SetupSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/), password: z.string().min(10).max(200) });
+const AddUserSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/), role: z.enum(ROLES) });
+const RemoveUserSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/) });
 
 function cookieToken(req: IncomingMessage): string | undefined {
   for (const part of (req.headers.cookie ?? '').split(';')) {
@@ -183,6 +189,21 @@ export function createServer(opts: WebServerOptions): Server {
         setCookie(res, '', 0);
         return send(res, 200, { ok: true });
       }
+      // First-run setup: the only moment an account can be created without an
+      // owner. Later accounts are owner-managed (/api/users) or CLI-only.
+      if (req.method === 'GET' && path === '/api/auth/setup') {
+        return send(res, 200, { needed: users.list().length === 0 });
+      }
+      if (req.method === 'POST' && path === '/api/auth/setup') {
+        if (users.list().length > 0) return send(res, 409, { error: 'Already set up. Ask an owner to add you.' });
+        const parsed = SetupSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Username: 2-32 of a-z 0-9 _ -. Password: at least 10 characters.' });
+        users.add(parsed.data.username, 'owner', parsed.data.password);
+        const { token, maxAgeSec } = sessions.create({ username: parsed.data.username, role: 'owner' });
+        setCookie(res, token, maxAgeSec);
+        ctx.audit.append('access', { event: 'setup', user: parsed.data.username, ok: true });
+        return send(res, 201, { user: parsed.data.username, role: 'owner', permissions: permissionsOf('owner') });
+      }
 
       const user: User | null = sessions.get(cookieToken(req));
       if (req.method === 'GET' && path === '/api/auth/me') {
@@ -214,6 +235,36 @@ export function createServer(opts: WebServerOptions): Server {
       if (req.method === 'POST' && path === '/api/pause') {
         pauseWallet(env.PAUSE_FILE, ctx.audit, 'web', user!.username);
         return send(res, 200, { paused: true });
+      }
+      // Owner-only account management. Passwords are generated server-side and
+      // returned exactly once; neither the LLM nor the web can read them again.
+      if (req.method === 'GET' && path === '/api/users') {
+        return send(res, 200, { users: users.list(), you: user!.username });
+      }
+      if (req.method === 'POST' && path === '/api/users') {
+        const parsed = AddUserSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Username: 2-32 of a-z 0-9 _ -. Role: owner, operator or viewer.' });
+        const { username, role } = parsed.data;
+        const password = users.add(username, role);
+        sessions.destroyUser(username);
+        ctx.audit.append('access', { event: 'user_added', by: user!.username, user: username, role });
+        return send(res, 201, { username, role, password });
+      }
+      if (req.method === 'POST' && path === '/api/users/remove') {
+        const parsed = RemoveUserSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { username }.' });
+        const { username } = parsed.data;
+        if (username === user!.username) return send(res, 400, { error: 'You cannot remove your own account.' });
+        const target = users.list().find((u) => u.username === username);
+        if (!target) return send(res, 404, { error: `No user ${username}.` });
+        const owners = users.list().filter((u) => u.role === 'owner');
+        if (target.role === 'owner' && owners.length === 1) {
+          return send(res, 400, { error: 'This is the last owner. Add another owner first.' });
+        }
+        users.remove(username);
+        sessions.destroyUser(username);
+        ctx.audit.append('access', { event: 'user_removed', by: user!.username, user: username });
+        return send(res, 200, { removed: true });
       }
 
       if (req.method === 'GET' && path === '/api/info') {

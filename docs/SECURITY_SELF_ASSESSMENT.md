@@ -37,7 +37,7 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | Budget derived from the audit log; failed txs still count | ✅ |
 | Kill switch (`pause`); the web UI can pause but only the CLI can resume, and both are audit-logged | ✅ |
 | Web server refuses foreign `Host`/`Origin` and non-JSON POSTs (no cross-site approval or transfer); unanswered T2 approvals auto-reject after two minutes | ✅ |
-| Web sign-in: scrypt-hashed passwords, HttpOnly SameSite=Strict session cookie, failed-login throttle; accounts managed from the CLI only | ✅ |
+| Web sign-in: scrypt-hashed passwords, HttpOnly SameSite=Strict session cookie, failed-login throttle; first-run setup creates the first owner, owners manage accounts (audited, sessions killed on removal), CLI also works | ✅ |
 | Role-based access checked server-side on every route: viewer reads, operator previews/transacts/chats, only owner approves T2 or pauses; sign-ins, approvals and pauses are audit-logged with the user name | ✅ |
 | Voice input only fills the chat box; approvals always need an owner's click | ✅ |
 | Mainnet refused unless explicitly enabled | ✅ |

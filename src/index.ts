@@ -73,10 +73,8 @@ async function main() {
     const webCtx: ToolContext = { clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) };
     const users = new UserStore(env.USERS_FILE);
     if (users.list().length === 0) {
-      // First run: create one owner so the UI is never open without a sign-in.
-      const password = users.add('owner', 'owner');
-      console.log(`No web accounts yet. Created "owner" with password: ${password}`);
-      console.log('It is shown once. Add more with `npm run cli -- user add <name> <role>`.');
+      // The UI shows a first-run setup screen; the CLI path also works.
+      console.log('No web accounts yet. Create the first owner in the UI, or run `npm run cli -- user add <name> owner`.');
     }
     const server = createServer({ env, ctx: webCtx, approver, vault, users });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));

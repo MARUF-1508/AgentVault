@@ -101,6 +101,11 @@ export class Sessions {
   destroy(token: string | undefined): void {
     if (token) this.byToken.delete(token);
   }
+
+  /** Drops every session a user has, e.g. right after their account is removed. */
+  destroyUser(username: string): void {
+    for (const [token, s] of this.byToken) if (s.username === username) this.byToken.delete(token);
+  }
 }
 
 /** Per-username failed-login throttle: after `max` failures in `windowMs`, refuse. */
