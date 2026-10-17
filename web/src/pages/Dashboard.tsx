@@ -1,11 +1,15 @@
 import { motion } from 'framer-motion';
 import { Activity, ArrowRight, Bot, Gauge, Link2, Send, ShieldCheck } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { getVerify } from '../api';
 import { useAuth } from '../auth';
 import AuditTimeline from '../components/AuditTimeline';
+import Onboarding from '../components/Onboarding';
 import { BudgetMeters, Holdings } from '../components/Portfolio';
+
+// recharts is heavy; keep it out of the first paint.
+const StatsChart = lazy(() => import('../components/StatsChart'));
 import { useWallet } from '../data';
 import { pct, usePageTitle, usePoll } from '../format';
 
@@ -82,6 +86,10 @@ export default function Dashboard() {
         />
       </div>
 
+      <motion.div variants={rise}>
+        <Onboarding />
+      </motion.div>
+
       <div className="grid-2">
         <motion.div variants={rise}>
           <Holdings />
@@ -91,6 +99,12 @@ export default function Dashboard() {
           <BudgetMeters budget={budget} />
         </motion.section>
       </div>
+
+      <motion.div variants={rise}>
+        <Suspense fallback={<div className="skeleton" style={{ height: 250 }} />}>
+          <StatsChart />
+        </Suspense>
+      </motion.div>
 
       <motion.div variants={rise}>
         <AuditTimeline limit={8} compact />

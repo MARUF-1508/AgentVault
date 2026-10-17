@@ -1,3 +1,4 @@
+import { Loader2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { preview, transact, type TransactResult, type Tier, type TransferIntent } from '../api';
@@ -104,10 +105,12 @@ export default function PolicyCheck() {
         )}
         <div className="row wide">
           <button type="submit" disabled={busy || !to}>
+            {busy && <Loader2 size={14} className="spin" aria-hidden />}
             Check tier
           </button>
           {verdict && verdict.tier !== 'T3_DENY' && can('transact') && (
             <button type="button" className="ghost" disabled={busy} onClick={submit}>
+              {busy && <Loader2 size={14} className="spin" aria-hidden />}
               {verdict.tier === 'T1_AUTO' ? 'Send it' : 'Send for approval'}
             </button>
           )}

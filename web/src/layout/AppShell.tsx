@@ -1,37 +1,16 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  Bot,
-  ChevronDown,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  Moon,
-  OctagonPause,
-  ScrollText,
-  Send,
-  Settings,
-  ShieldCheck,
-  Sun,
-  X,
-} from 'lucide-react';
+import { ChevronDown, LogOut, Menu, Moon, OctagonPause, Search, Sun, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation, useOutlet } from 'react-router-dom';
 import { toast } from 'sonner';
 import { pause } from '../api';
 import { useAuth } from '../auth';
 import ApprovalModal from '../components/ApprovalModal';
+import CommandPalette from '../components/CommandPalette';
 import { useWallet } from '../data';
 import { shortAddr } from '../format';
+import { NAV } from '../nav';
 import { useTheme } from '../theme';
-
-export const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/agent', label: 'Agent', icon: Bot },
-  { to: '/transfer', label: 'Transfer', icon: Send },
-  { to: '/activity', label: 'Activity', icon: ScrollText },
-  { to: '/security', label: 'Security', icon: ShieldCheck },
-  { to: '/settings', label: 'Settings', icon: Settings },
-] as const;
 
 function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -158,8 +137,21 @@ export default function AppShell() {
   const location = useLocation();
   const outlet = useOutlet();
   const [drawer, setDrawer] = useState(false);
+  const [palette, setPalette] = useState(false);
 
   useEffect(() => setDrawer(false), [location.pathname]);
+
+  // ⌘K / Ctrl-K opens the command palette from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPalette((p) => !p);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="shell">
@@ -216,6 +208,11 @@ export default function AppShell() {
             )}
           </div>
           <div className="row topbar-actions">
+            <button className="ghost palette-btn" aria-label="Search and commands (Ctrl+K)" title="Search and commands (Ctrl+K)" onClick={() => setPalette(true)}>
+              <Search size={15} aria-hidden />
+              <span className="hide-sm">Search</span>
+              <kbd className="palette-kbd hide-sm">⌘K</kbd>
+            </button>
             <PauseControl />
             <button className="ghost icon" onClick={toggle} aria-label={`Switch to ${resolved === 'dark' ? 'light' : 'dark'} theme`} title="Toggle theme">
               <AnimatePresence mode="wait" initial={false}>
@@ -255,6 +252,7 @@ export default function AppShell() {
         </AnimatePresence>
       </div>
 
+      <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <ApprovalModal />
     </div>
   );

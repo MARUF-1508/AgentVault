@@ -1,4 +1,6 @@
+import { ScrollText } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { getActivity, getVerify, type ActivityEntry } from '../api';
 import { useWallet } from '../data';
 import { linkify, shortAddr, TierBadge, usePoll } from '../format';
@@ -110,8 +112,24 @@ export default function AuditTimeline({ limit = 50, compact = false }: { limit?:
           </span>
         </div>
       </div>
-      {shown.length === 0 ? (
-        <p className="muted">Nothing here yet.</p>
+      {entries === null ? (
+        <div className="tl-skeleton" aria-label="Loading activity">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 34, marginTop: '0.5rem', opacity: 1 - i * 0.18 }} />
+          ))}
+        </div>
+      ) : shown.length === 0 ? (
+        <div className="empty-state center">
+          <ScrollText size={22} className="muted" aria-hidden />
+          <p className="muted">
+            {filter === 'All' ? 'No activity yet. Every intent, decision and transaction will show up here.' : `Nothing under “${filter}”.`}
+          </p>
+          {filter === 'All' && !compact && (
+            <Link className="btn ghost small" to="/transfer">
+              Preview a transfer
+            </Link>
+          )}
+        </div>
       ) : (
         <ol className={`timeline ${compact ? 'compact' : ''}`}>
           {shown.map((e) => (

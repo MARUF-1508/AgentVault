@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ShieldAlert } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { decide, getPending } from '../api';
 import { useAuth } from '../auth';
@@ -48,6 +48,7 @@ export default function ApprovalModal() {
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
+  const [typed, setTyped] = useState('');
   const rejectRef = useRef<HTMLButtonElement>(null);
   const mayApprove = can('approve');
 
@@ -69,6 +70,9 @@ export default function ApprovalModal() {
     };
   }, [me]);
 
+  // A fresh pending request starts with an empty confirmation field.
+  useEffect(() => setTyped(''), [pending]);
+
   // Focus the safe choice first, so a stray Enter rejects.
   useEffect(() => {
     if (pending) rejectRef.current?.focus();
@@ -88,6 +92,13 @@ export default function ApprovalModal() {
 
   const f = pending ? parse(pending) : {};
   const left = expiresAt ? Math.max(0, expiresAt - now) : 0;
+
+  // First-time recipients are the risky case, so approving one asks the human to
+  // confirm the last four characters of the address instead of a single click.
+  const targetMatch = useMemo(() => /0x[0-9a-fA-F]{40}/.exec(f.Target ?? ''), [f.Target]);
+  const isNewRecipient = /not on the allowlist/i.test(f.Why ?? '') && targetMatch !== null;
+  const last4 = targetMatch ? targetMatch[0].slice(-4).toLowerCase() : '';
+  const unlocked = !isNewRecipient || typed.trim().toLowerCase() === last4;
 
   return (
     <AnimatePresence>
@@ -159,12 +170,28 @@ export default function ApprovalModal() {
             )}
             {mayApprove ? (
               <>
+                {isNewRecipient && (
+                  <div className="confirm-address">
+                    <label>
+                      First time sending to this address. Type its last 4 characters ({last4.length}/4) to unlock approval.
+                      <input
+                        value={typed}
+                        onChange={(e) => setTyped(e.target.value)}
+                        placeholder="last 4 characters"
+                        className="mono"
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-label="Type the last four characters of the target address"
+                      />
+                    </label>
+                  </div>
+                )}
                 <div className="row end">
                   <button ref={rejectRef} className="reject" disabled={busy} onClick={() => answer(false)}>
                     Reject
                   </button>
-                  <button className="approve" disabled={busy} onClick={() => answer(true)}>
-                    Approve and sign
+                  <button className="approve" disabled={busy || !unlocked} onClick={() => answer(true)}>
+                    {isNewRecipient && !unlocked ? 'Type to unlock' : 'Approve and sign'}
                   </button>
                 </div>
                 <p className="muted small">Approvals need a click. Voice commands can never approve.</p>

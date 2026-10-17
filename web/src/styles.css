@@ -348,6 +348,64 @@ th.mine { color: var(--accent-2); }
 .splash img { animation: breathe 1.4s ease-in-out infinite; border-radius: 12px; }
 @keyframes breathe { 50% { transform: scale(1.08); opacity: 0.7; } }
 
+/* Command palette */
+.palette-overlay { align-items: flex-start; padding-top: 12vh; }
+.palette { width: min(560px, 100%); margin: 0; padding: 0.7rem; border-radius: 14px; }
+.palette-kbd { border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; font-size: 0.7rem; color: var(--muted); background: var(--surface-2); font-family: inherit; }
+.palette .input-icon input { padding-right: 3.2rem; }
+.palette .input-icon .palette-kbd { position: absolute; right: 0.5rem; }
+.palette-list { list-style: none; margin: 0.5rem 0 0.2rem; padding: 0; max-height: 46vh; overflow-y: auto; display: grid; gap: 0.15rem; }
+.palette-item { width: 100%; justify-content: flex-start; background: transparent; color: var(--text); border: 0; border-radius: 9px; padding: 0.5rem 0.65rem; font-weight: 500; }
+.palette-item:hover:not(:disabled), .palette-item.on { background: var(--accent-soft); color: var(--accent-2); box-shadow: none; }
+.palette-label { flex: 1; text-align: left; }
+.palette-hint { max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-empty { padding: 0.8rem 0.65rem; }
+.palette-btn { font-size: 0.8rem; padding: 0.4rem 0.7rem; color: var(--muted); }
+
+/* Onboarding checklist */
+.onboarding { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: linear-gradient(180deg, var(--accent-soft), transparent 55%), var(--surface); }
+.checklist { list-style: none; margin: 0.7rem 0 0; padding: 0; display: grid; gap: 0.35rem; }
+.checklist li { display: grid; grid-template-columns: 22px 1fr auto; gap: 0.65rem; align-items: center; padding: 0.5rem; border-radius: 10px; transition: background-color 0.15s; }
+.checklist li:hover { background: var(--surface-2); }
+.checklist li.done strong { color: var(--muted); text-decoration: line-through; }
+.checklist p { margin: 0.05rem 0 0; }
+.check-action { justify-self: end; }
+@media (max-width: 480px) {
+  .checklist li { grid-template-columns: 22px 1fr; }
+  .check-action { grid-column: 2; justify-self: start; }
+}
+
+/* Activity chart */
+.chart-wrap { margin-top: 0.6rem; }
+.legend { display: flex; gap: 0.8rem; }
+.legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.swatch.accent { background: var(--accent-2); }
+.swatch.bad { background: var(--bad); }
+
+/* Receive modal */
+.receive { width: min(380px, 100%); margin: 0; text-align: center; }
+.qr-plate { width: max-content; margin: 0.9rem auto 0.6rem; background: #fff; padding: 12px; border-radius: 14px; box-shadow: 0 6px 18px rgba(2, 6, 23, 0.25); }
+.addr-line { overflow-wrap: anywhere; margin: 0.3rem 0; }
+.receive .notice { text-align: left; }
+
+/* Empty states */
+.empty-state { display: grid; gap: 0.5rem; padding: 0.6rem 0; }
+.empty-state.center { place-items: center; text-align: center; }
+
+/* Approval: type-to-confirm for first-time recipients */
+.confirm-address { margin: 0.7rem 0 0.2rem; }
+.confirm-address label { display: grid; gap: 0.4rem; font-size: 0.82rem; color: var(--warn); font-weight: 550; }
+.confirm-address input { border-color: var(--warn); }
+
+/* Pending spinners */
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Token marks */
+.asset-icon.eth { background: rgba(98, 126, 234, 0.16); }
+.asset-icon.usdc { background: #2775ca; color: #fff; font-weight: 800; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }

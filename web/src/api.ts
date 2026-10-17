@@ -55,6 +55,13 @@ export interface ActivityEntry {
   data: Record<string, unknown>;
 }
 
+export interface DailyStat {
+  date: string;
+  txCount: number;
+  deniedCount: number;
+  spentBase: Record<string, string>;
+}
+
 export type Role = 'viewer' | 'operator' | 'owner';
 export type Permission = 'read' | 'preview' | 'transact' | 'chat' | 'approve' | 'pause' | 'admin';
 
@@ -125,6 +132,7 @@ export const getPortfolio = () => read<Portfolio>('/api/portfolio');
 export const getPolicy = () => read<Policy>('/api/policy');
 export const getBudget = () => read<Budget>('/api/budget');
 export const getActivity = (limit = 30) => read<ActivityEntry[]>(`/api/activity?limit=${limit}`);
+export const getStats = () => read<DailyStat[]>('/api/stats');
 export const getVerify = () => read<{ ok: boolean; brokenAt?: number; reason?: string }>('/api/verify');
 export const getPending = () => read<{ pending: string | null; expiresAt: number | null }>('/api/pending');
 export const decide = (approved: boolean) => post<{ decided: boolean }>('/api/decide', { approved });
