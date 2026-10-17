@@ -244,4 +244,7 @@ forge create contracts/AgentVault.sol:AgentVault \
 `AGENTS.md` holds the project rules and `.opencode/skills/agent-wallet/SKILL.md` is an opencode skill with the workflow. opencode picks both up automatically when run from the repo root.
 
 ## License
-MIT
+
+MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 It_Works_On_My_Machine.
+
+Third-party components keep their own licenses: the npm dependencies are permissive (viem, zod, react, recharts, vitest and others MIT; `openai` and `typescript` Apache-2.0; `dotenv` BSD-2-Clause; `lucide-react` and `qrcode.react` ISC), and `forge-std` is MIT. Uniswap v3 is called on-chain as an external contract; no third-party source is vendored.
