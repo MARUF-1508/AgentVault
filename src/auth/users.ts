@@ -9,6 +9,8 @@ const UserRecord = z.object({
   role: z.enum(ROLES),
   salt: z.string().regex(/^[0-9a-f]{32}$/),
   hash: z.string().regex(/^[0-9a-f]{128}$/),
+  /** Base32 TOTP secret, present once the user has confirmed 2FA setup. */
+  totp: z.string().regex(/^[A-Z2-7]{16,64}$/).optional(),
 });
 
 const UsersFile = z.object({ version: z.literal(1), users: z.array(UserRecord) });
@@ -54,6 +56,22 @@ export class UserStore {
     return password;
   }
 
+  /** The user's confirmed TOTP secret, or null when 2FA is off. */
+  totpSecret(username: string): string | null {
+    return this.load().users.find((u) => u.username === username)?.totp ?? null;
+  }
+
+  /** Enables (secret) or disables (null) 2FA for a user. Audit this at the call site. */
+  setTotp(username: string, secret: string | null): void {
+    const data = this.load();
+    data.users = data.users.map((u) => {
+      if (u.username !== username) return u;
+      const { totp: _drop, ...rest } = u;
+      return secret === null ? rest : { ...rest, totp: UserRecord.parse({ ...rest, totp: secret }).totp! };
+    });
+    this.save(data);
+  }
+
   remove(username: string): boolean {
     const data = this.load();
     const before = data.users.length;
@@ -77,24 +95,32 @@ export class UserStore {
 
 /** In-memory sessions keyed by an unguessable token; lost on restart by design. */
 export class Sessions {
-  private readonly byToken = new Map<string, User & { expires: number }>();
+  private readonly byToken = new Map<string, User & { expires: number; lastSeen: number }>();
 
-  constructor(private readonly ttlMs = 8 * 60 * 60 * 1000) {}
+  /**
+   * `ttlMs` is the absolute lifetime; `idleMs` signs a session out after that
+   * much inactivity even if the absolute lifetime has not passed.
+   */
+  constructor(
+    private readonly ttlMs = 8 * 60 * 60 * 1000,
+    private readonly idleMs = 30 * 60 * 1000,
+  ) {}
 
-  create(user: User): { token: string; maxAgeSec: number } {
+  create(user: User, now = Date.now()): { token: string; maxAgeSec: number } {
     const token = randomBytes(32).toString('base64url');
-    this.byToken.set(token, { ...user, expires: Date.now() + this.ttlMs });
+    this.byToken.set(token, { ...user, expires: now + this.ttlMs, lastSeen: now });
     return { token, maxAgeSec: Math.floor(this.ttlMs / 1000) };
   }
 
-  get(token: string | undefined): User | null {
+  get(token: string | undefined, now = Date.now()): User | null {
     if (!token) return null;
     const s = this.byToken.get(token);
     if (!s) return null;
-    if (s.expires < Date.now()) {
+    if (s.expires < now || now - s.lastSeen > this.idleMs) {
       this.byToken.delete(token);
       return null;
     }
+    s.lastSeen = now;
     return { username: s.username, role: s.role };
   }
 
@@ -105,6 +131,18 @@ export class Sessions {
   /** Drops every session a user has, e.g. right after their account is removed. */
   destroyUser(username: string): void {
     for (const [token, s] of this.byToken) if (s.username === username) this.byToken.delete(token);
+  }
+
+  /** Drops every session of a user except `keepToken`; returns how many were ended. */
+  destroyUserExcept(username: string, keepToken: string | undefined): number {
+    let n = 0;
+    for (const [token, s] of this.byToken) {
+      if (s.username === username && token !== keepToken) {
+        this.byToken.delete(token);
+        n++;
+      }
+    }
+    return n;
   }
 }
 

@@ -62,6 +62,31 @@ describe('Sessions and LoginThrottle', () => {
     expect(s.get(b)).toEqual({ username: 'b', role: 'viewer' });
   });
 
+  it('signs a session out after idleMs of inactivity, before the absolute TTL', () => {
+    // 60s absolute TTL, 1s idle timeout.
+    const s = new Sessions(60_000, 1_000);
+    const { token } = s.create({ username: 'a', role: 'viewer' }, 0);
+    expect(s.get(token, 900)).not.toBeNull();
+    // 1.5s after the last seen request (not the last 1s of absolute life).
+    expect(s.get(token, 2400)).toBeNull();
+    // The absolute TTL still applies even with a long idle window.
+    const longIdle = new Sessions(1_000, 60_000);
+    const t2 = longIdle.create({ username: 'b', role: 'viewer' }, 0).token;
+    expect(longIdle.get(t2, 500)).not.toBeNull();
+    expect(longIdle.get(t2, 1_500)).toBeNull();
+  });
+
+  it('destroyUserExcept ends other sessions but keeps the current one', () => {
+    const s = new Sessions();
+    const mine = s.create({ username: 'a', role: 'owner' }).token;
+    const phone = s.create({ username: 'a', role: 'owner' }).token;
+    const other = s.create({ username: 'b', role: 'viewer' }).token;
+    expect(s.destroyUserExcept('a', mine)).toBe(1);
+    expect(s.get(mine)).toEqual({ username: 'a', role: 'owner' });
+    expect(s.get(phone)).toBeNull();
+    expect(s.get(other)).toEqual({ username: 'b', role: 'viewer' });
+  });
+
   it('blocks after max failures inside the window, then recovers', () => {
     const t = new LoginThrottle(2, 1000);
     t.fail('a', 0);

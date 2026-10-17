@@ -9,6 +9,7 @@ import { chatTurn } from '../agent/agent.js';
 import { runTool, type ToolContext } from '../agent/tools.js';
 import type { WebApprover } from '../approval/approver.js';
 import { can, permissionsOf, ROLES, type Permission } from '../auth/rbac.js';
+import { generateTotpSecret, otpauthUri, verifyTotp } from '../auth/totp.js';
 import { LoginThrottle, Sessions, type User, type UserStore } from '../auth/users.js';
 import type { Env } from '../config.js';
 import { pauseWallet } from '../policy/killswitch.js';
@@ -74,7 +75,11 @@ export function inlineScriptHashes(html: string): string[] {
 }
 
 const COOKIE = 'av_session';
-const LoginSchema = z.object({ username: z.string().min(1).max(32), password: z.string().min(1).max(200) });
+const LoginSchema = z.object({
+  username: z.string().min(1).max(32),
+  password: z.string().min(1).max(200),
+  code: z.string().max(10).optional(),
+});
 const SetupSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/), password: z.string().min(10).max(200) });
 const AddUserSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/), role: z.enum(ROLES) });
 const RemoveUserSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/) });
@@ -183,6 +188,8 @@ export function createServer(opts: WebServerOptions): Server {
   const sessions = opts.sessions ?? new Sessions();
   const throttle = new LoginThrottle();
   const chats = new Map<string, OpenAI.Chat.Completions.ChatCompletionMessageParam[]>();
+  // Unconfirmed TOTP secrets: enabled only after one valid code (10-minute window).
+  const pendingTotp = new Map<string, { secret: string; at: number }>();
   const policyHash = policyHashOf(env.POLICY_FILE);
 
   // Strict CSP; the one inline script (pre-paint theme pick) is hash-allowed.
@@ -226,12 +233,28 @@ export function createServer(opts: WebServerOptions): Server {
           return send(res, 429, { error: 'Too many failed sign-ins. Try again in 15 minutes.' });
         }
         const user = users.verify(username, password);
-        ctx.audit.append('access', { event: 'login', user: username, ok: Boolean(user) });
         if (!user) {
           throttle.fail(username);
+          ctx.audit.append('access', { event: 'login', user: username, ok: false });
           return send(res, 401, { error: 'Wrong username or password.' });
         }
+        // Second factor, when the account has it: no session is created until
+        // both factors pass; the code prompt is driven by the `totp` flag.
+        const secret = users.totpSecret(username);
+        if (secret) {
+          const code = parsed.data.code ?? '';
+          if (!code) {
+            ctx.audit.append('access', { event: 'login', user: username, ok: false, reason: 'totp_required' });
+            return send(res, 401, { error: 'Enter the 6-digit code from your authenticator app.', totp: true });
+          }
+          if (!verifyTotp(secret, code)) {
+            throttle.fail(username);
+            ctx.audit.append('access', { event: 'login', user: username, ok: false, reason: 'totp_wrong' });
+            return send(res, 401, { error: 'Wrong authenticator code.', totp: true });
+          }
+        }
         throttle.clear(username);
+        ctx.audit.append('access', { event: 'login', user: username, ok: true });
         const { token, maxAgeSec } = sessions.create(user);
         setCookie(res, token, maxAgeSec);
         return send(res, 200, { user: user.username, role: user.role, permissions: permissionsOf(user.role) });
@@ -260,7 +283,60 @@ export function createServer(opts: WebServerOptions): Server {
       const user: User | null = sessions.get(cookieToken(req));
       if (req.method === 'GET' && path === '/api/auth/me') {
         if (!user) return send(res, 401, { error: 'Not signed in.' });
-        return send(res, 200, { user: user.username, role: user.role, permissions: permissionsOf(user.role) });
+        return send(res, 200, {
+          user: user.username,
+          role: user.role,
+          permissions: permissionsOf(user.role),
+          totpEnabled: users.totpSecret(user.username) !== null,
+        });
+      }
+      // Self-service 2FA: setup returns a secret (pending until one code
+      // confirms it), enable confirms it, disable re-checks the password. All
+      // three act on the signed-in user only, so no extra role is required.
+      if (req.method === 'GET' && path === '/api/auth/totp') {
+        if (!user) return send(res, 401, { error: 'Not signed in.' });
+        return send(res, 200, { enabled: users.totpSecret(user.username) !== null });
+      }
+      if (req.method === 'POST' && path === '/api/auth/totp/setup') {
+        if (!user) return send(res, 401, { error: 'Not signed in.' });
+        const secret = generateTotpSecret();
+        pendingTotp.set(user.username, { secret, at: Date.now() });
+        ctx.audit.append('access', { event: 'totp_setup_started', user: user.username });
+        return send(res, 200, { secret, uri: otpauthUri(user.username, secret) });
+      }
+      if (req.method === 'POST' && path === '/api/auth/totp/enable') {
+        if (!user) return send(res, 401, { error: 'Not signed in.' });
+        const parsed = z.object({ code: z.string().max(10) }).safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { code }.' });
+        const pending = pendingTotp.get(user.username);
+        if (!pending || Date.now() - pending.at > 10 * 60_000) {
+          return send(res, 400, { error: 'Start the two-factor setup again.' });
+        }
+        if (!verifyTotp(pending.secret, parsed.data.code)) {
+          return send(res, 400, { error: 'That code is not right. Check the device clock and try again.' });
+        }
+        users.setTotp(user.username, pending.secret);
+        pendingTotp.delete(user.username);
+        ctx.audit.append('access', { event: 'totp_enabled', user: user.username });
+        return send(res, 200, { enabled: true });
+      }
+      if (req.method === 'POST' && path === '/api/auth/totp/disable') {
+        if (!user) return send(res, 401, { error: 'Not signed in.' });
+        const parsed = z.object({ password: z.string().min(1).max(200) }).safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { password }.' });
+        if (!users.verify(user.username, parsed.data.password)) {
+          throttle.fail(user.username);
+          return send(res, 401, { error: 'Wrong password.' });
+        }
+        users.setTotp(user.username, null);
+        ctx.audit.append('access', { event: 'totp_disabled', user: user.username });
+        return send(res, 200, { enabled: false });
+      }
+      if (req.method === 'POST' && path === '/api/auth/sessions/revoke') {
+        if (!user) return send(res, 401, { error: 'Not signed in.' });
+        const revoked = sessions.destroyUserExcept(user.username, cookieToken(req));
+        ctx.audit.append('access', { event: 'sessions_revoked', user: user.username, revoked });
+        return send(res, 200, { revoked });
       }
       const needs = ROUTES[`${req.method} ${path}`];
       if (path.startsWith('/api/') && needs) {

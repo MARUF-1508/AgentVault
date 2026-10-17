@@ -1,7 +1,20 @@
-import { Monitor, Moon, Sun, UserPlus, UserRoundX } from 'lucide-react';
+import { KeyRound, Monitor, Moon, ShieldCheck, Sun, UserPlus, UserRoundX } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { addUser, getUsers, removeUser, type NewAccount, type Role, type UserAccount } from '../api';
+import {
+  addUser,
+  disableTotp,
+  enableTotp,
+  getTotpStatus,
+  getUsers,
+  removeUser,
+  revokeOtherSessions,
+  setupTotp,
+  type NewAccount,
+  type Role,
+  type UserAccount,
+} from '../api';
 import { useAuth } from '../auth';
 import Reveal from '../components/Reveal';
 import { useWallet } from '../data';
@@ -136,6 +149,141 @@ function Team() {
   );
 }
 
+/**
+ * Two-factor sign-in and session control for the signed-in account itself.
+ * The secret stays pending server-side until one valid code confirms it, so a
+ * half-finished setup can never lock anyone out.
+ */
+function Security() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getTotpStatus()
+      .then((r) => setEnabled(r.enabled))
+      .catch(() => setEnabled(null));
+  }, []);
+
+  const begin = () => {
+    setBusy(true);
+    setupTotp()
+      .then(setSetup)
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  const confirm = (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    enableTotp(code)
+      .then(() => {
+        setEnabled(true);
+        setSetup(null);
+        setCode('');
+        toast.success('Two-factor sign-in is on.');
+      })
+      .catch((err: Error) => toast.error(err.message))
+      .finally(() => setBusy(false));
+  };
+
+  const disable = (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    disableTotp(password)
+      .then(() => {
+        setEnabled(false);
+        setPassword('');
+        toast.success('Two-factor sign-in is off.');
+      })
+      .catch((err: Error) => toast.error(err.message))
+      .finally(() => setBusy(false));
+  };
+
+  const revoke = () => {
+    revokeOtherSessions()
+      .then((r) => toast.success(r.revoked === 0 ? 'No other devices were signed in.' : `Signed out ${r.revoked} other session(s).`))
+      .catch((e: Error) => toast.error(e.message));
+  };
+
+  return (
+    <section className="card">
+      <h2 className="row">
+        <ShieldCheck size={18} aria-hidden /> Sign-in security
+      </h2>
+      {enabled === null && <p className="muted">Checking…</p>}
+      {enabled === false && !setup && (
+        <>
+          <p className="muted small">
+            Two-factor is off. Turn it on to require a 6-digit code from an authenticator app every time this account signs in.
+          </p>
+          <button onClick={begin} disabled={busy}>
+            <KeyRound size={15} aria-hidden /> Turn on two-factor
+          </button>
+        </>
+      )}
+      {enabled === false && setup && (
+        <form className="stack-form" onSubmit={confirm}>
+          <p className="muted small">Scan this with any authenticator app, then type the 6-digit code it shows to confirm.</p>
+          <div className="row totp-setup">
+            <span className="totp-qr">
+              <QRCodeSVG value={setup.uri} size={148} />
+            </span>
+            <div>
+              <p className="muted small">Cannot scan? Enter the key by hand:</p>
+              <p className="row">
+                <code className="mono">{setup.secret}</code>
+                <CopyButton value={setup.secret} label="Copy 2FA key" />
+              </p>
+            </div>
+          </div>
+          <label>
+            <span>Code from the app</span>
+            <input
+              className="mono"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="123456"
+              maxLength={7}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              required
+            />
+          </label>
+          <div className="row">
+            <button type="submit" disabled={busy || code.trim().length < 6}>
+              Confirm and turn on
+            </button>
+            <button type="button" className="ghost" onClick={() => setSetup(null)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {enabled === true && (
+        <form className="stack-form" onSubmit={disable}>
+          <p className="muted small">Two-factor is on. To turn it off, confirm your password.</p>
+          <label>
+            <span>Password</span>
+            <input type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </label>
+          <button type="submit" className="ghost" disabled={busy || !password}>
+            Turn off two-factor
+          </button>
+        </form>
+      )}
+      <p className="muted small sessions-line">
+        Sessions expire after 30 minutes without activity (8 hours at most).{' '}
+        <button type="button" className="ghost small" onClick={revoke}>
+          Sign out my other devices
+        </button>
+      </p>
+    </section>
+  );
+}
+
 export default function Settings() {
   usePageTitle('Settings');
   const { choice, setChoice } = useTheme();
@@ -192,6 +340,8 @@ export default function Settings() {
             Want another account? Ask an owner, or run <code>npm run cli -- user add &lt;name&gt; &lt;role&gt;</code> on the host.
           </p>
         </section>
+
+        <Security />
 
         <section className="card">
           <h2>Wallet</h2>

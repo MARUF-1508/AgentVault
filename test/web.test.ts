@@ -9,6 +9,7 @@ import type { ToolContext } from '../src/agent/tools.js';
 import type { Env } from '../src/config.js';
 import type { Executor } from '../src/executor/executor.js';
 import { PolicySchema } from '../src/policy/types.js';
+import { totp } from '../src/auth/totp.js';
 import { UserStore } from '../src/auth/users.js';
 import { createServer, inlineScriptHashes } from '../src/web/server.js';
 import { request, type Server } from 'node:http';
@@ -349,5 +350,82 @@ describe('hardening headers, policy hash and CSV export', () => {
     expect(r.headers.get('content-type')).toBe('text/csv; charset=utf-8');
     expect(r.headers.get('content-disposition')).toContain('agentvault-audit.csv');
     expect((await r.text()).split('\n')[0]).toBe('seq,ts,type,data');
+  });
+
+  const tinaPassword = users2.add('tina', 'operator');
+
+  it('enables 2FA only after a valid code, then requires it at sign-in', async () => {
+    const as = (path: string, body: unknown, cookieIn = cookie) =>
+      fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { cookie: cookieIn, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    const tina = await login(base, 'tina', tinaPassword);
+    const started = (await (await as('/api/auth/totp/setup', {}, tina)).json()) as { secret: string; uri: string };
+    expect(started.secret).toMatch(/^[A-Z2-7]{32}$/);
+    expect(started.uri).toContain('otpauth://totp/');
+
+    // A wrong code must not enable anything.
+    expect((await as('/api/auth/totp/enable', { code: '000000' }, tina)).status).toBe(400);
+    expect((await as('/api/auth/totp/enable', { code: totp(started.secret) }, tina)).status).toBe(200);
+
+    // Password alone is no longer enough; a bad code is a failed sign-in.
+    const noCode = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'tina', password: tinaPassword }),
+    });
+    expect(noCode.status).toBe(401);
+    expect(await noCode.json()).toMatchObject({ totp: true });
+    const badCode = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'tina', password: tinaPassword, code: '111111' }),
+    });
+    expect(badCode.status).toBe(401);
+    expect(await badCode.json()).toMatchObject({ totp: true });
+
+    // Password + current code signs in.
+    const good = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'tina', password: tinaPassword, code: totp(started.secret) }),
+    });
+    expect(good.status).toBe(200);
+    const tina2 = (good.headers.get('set-cookie') ?? '').split(';')[0]!;
+    const me = (await (await fetch(`${base}/api/auth/me`, { headers: { cookie: tina2 } })).json()) as { totpEnabled?: boolean };
+    expect(me.totpEnabled).toBe(true);
+
+    // Turning it off needs the password.
+    expect((await as('/api/auth/totp/disable', { password: 'not-it' }, tina2)).status).toBe(401);
+    expect((await as('/api/auth/totp/disable', { password: tinaPassword }, tina2)).status).toBe(200);
+    expect((await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'tina', password: tinaPassword }),
+    })).status).toBe(200);
+  });
+
+  it('revokes the other sessions of the signed-in user and keeps the current one', async () => {
+    const first = await login(base, 'tina', tinaPassword);
+    const second = await login(base, 'tina', tinaPassword);
+    const r = await fetch(`${base}/api/auth/sessions/revoke`, {
+      method: 'POST',
+      headers: { cookie: first, 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { revoked: number }).revoked).toBeGreaterThanOrEqual(1);
+    expect((await fetch(`${base}/api/auth/me`, { headers: { cookie: first } })).status).toBe(200);
+    expect((await fetch(`${base}/api/auth/me`, { headers: { cookie: second } })).status).toBe(401);
+  });
+
+  it('requires a session for the 2FA endpoints themselves', async () => {
+    for (const path of ['/api/auth/totp', '/api/auth/totp/setup', '/api/auth/totp/enable', '/api/auth/totp/disable', '/api/auth/sessions/revoke']) {
+      const r = await fetch(`${base}${path}`, { method: path === '/api/auth/totp' ? 'GET' : 'POST', headers: { 'content-type': 'application/json' }, body: path === '/api/auth/totp' ? undefined : '{}' });
+      expect(r.status).toBe(401);
+    }
   });
 });

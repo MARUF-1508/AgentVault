@@ -6,7 +6,7 @@ interface AuthValue {
   /** True until the first /api/auth/me answer arrives. */
   loading: boolean;
   can: (p: Permission) => boolean;
-  login: (username: string, password: string) => Promise<Me>;
+  login: (username: string, password: string, code?: string) => Promise<Me>;
   logout: () => Promise<void>;
 }
 
@@ -30,8 +30,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('av:unauthorized', expired);
   }, []);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const user = await apiLogin(username, password);
+  const login = useCallback(async (username: string, password: string, code?: string) => {
+    const user = await apiLogin(username, password, code);
     setMe(user);
     return user;
   }, []);

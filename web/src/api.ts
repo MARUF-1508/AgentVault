@@ -82,6 +82,7 @@ export interface Me {
   user: string;
   role: Role;
   permissions: Permission[];
+  totpEnabled?: boolean;
 }
 
 export type Tier = 'T1_AUTO' | 'T2_CONFIRM' | 'T3_DENY';
@@ -123,7 +124,27 @@ export const getMe = () => api<Me>('/api/auth/me');
 /** Public: true when the store has no accounts yet (first-run setup screen). */
 export const getSetupNeeded = () => api<{ needed: boolean }>('/api/auth/setup');
 export const setup = (username: string, password: string) => post<Me>('/api/auth/setup', { username, password });
-export const login = (username: string, password: string) => post<Me>('/api/auth/login', { username, password });
+/** Thrown when the account has 2FA and the login needs the authenticator code. */
+export class TotpRequiredError extends Error {}
+
+export async function login(username: string, password: string, code?: string): Promise<Me> {
+  const r = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ username, password, ...(code ? { code } : {}) }),
+  });
+  const data = (await r.json()) as Me & { error?: string; totp?: boolean };
+  if (r.status === 401 && data.totp) throw new TotpRequiredError(data.error ?? 'Enter your authenticator code.');
+  if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+  return data;
+}
+
+export const getTotpStatus = () => read<{ enabled: boolean }>('/api/auth/totp');
+export const setupTotp = () => post<{ secret: string; uri: string }>('/api/auth/totp/setup', {});
+export const enableTotp = (code: string) => post<{ enabled: boolean }>('/api/auth/totp/enable', { code });
+export const disableTotp = (password: string) => post<{ enabled: boolean }>('/api/auth/totp/disable', { password });
+export const revokeOtherSessions = () => post<{ revoked: number }>('/api/auth/sessions/revoke', {});
 export const logout = () => post<{ ok: boolean }>('/api/auth/logout', {});
 export const getUsers = () => read<{ users: UserAccount[]; you: string }>('/api/users');
 export const addUser = (username: string, role: Role) => post<NewAccount>('/api/users', { username, role });

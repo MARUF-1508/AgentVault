@@ -3,7 +3,7 @@ import { Eye, EyeOff, KeyRound, Lock, ShieldCheck, User, UserRoundPlus } from 'l
 import { useEffect, useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { getSetupNeeded, setup } from '../api';
+import { getSetupNeeded, setup, TotpRequiredError } from '../api';
 import { useAuth } from '../auth';
 import { usePageTitle } from '../format';
 import { useTheme } from '../theme';
@@ -20,6 +20,8 @@ export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [code, setCode] = useState('');
+  const [needsCode, setNeedsCode] = useState(false);
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,6 +38,8 @@ export default function Login() {
     setUsername('');
     setPassword('');
     setConfirm('');
+    setCode('');
+    setNeedsCode(false);
   };
 
   const submit = (e: FormEvent) => {
@@ -56,9 +60,12 @@ export default function Login() {
         .catch((err: Error) => fail(err.message))
         .finally(() => setBusy(false));
     } else {
-      login(username.trim(), password)
+      login(username.trim(), password, code.trim() || undefined)
         .then((u) => done(u.user))
-        .catch((err: Error) => fail(err.message))
+        .catch((err: Error) => {
+          if (err instanceof TotpRequiredError) setNeedsCode(true);
+          fail(err.message);
+        })
         .finally(() => setBusy(false));
     }
   };
@@ -112,6 +119,25 @@ export default function Login() {
               <span className="input-icon">
                 <Lock size={16} aria-hidden />
                 <input type={show ? 'text' : 'password'} autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={10} />
+              </span>
+            </label>
+          )}
+          {!needed && needsCode && (
+            <label>
+              <span>Authenticator code</span>
+              <span className="input-icon">
+                <ShieldCheck size={16} aria-hidden />
+                <input
+                  autoFocus
+                  className="mono"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="123 456"
+                  maxLength={7}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                />
               </span>
             </label>
           )}
