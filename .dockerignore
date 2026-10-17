@@ -1,0 +1,13 @@
+node_modules
+web/node_modules
+web/dist
+data
+out
+cache
+lib
+test-results
+playwright-report
+coverage
+.env
+.git
+docs/assets

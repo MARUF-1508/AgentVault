@@ -22,6 +22,9 @@ const EnvSchema = z.object({
   // Base URL of the x402-style paid API the fetch_paid_data tool may call
   // (SSRF guard: requests to any other origin are refused).
   X402_API_URL: z.string().url().optional(),
+  // Interface the web UI binds to. Loopback by default; set 0.0.0.0 only in a
+  // container whose port is published on the host's loopback (see compose).
+  WEB_HOST: z.string().default('127.0.0.1'),
   ALLOW_MAINNET: z.string().default('false'),
   // Executor vault-routing mode (VAULT=true sends native transfers via agentSend).
   VAULT: z.string().default('false'),

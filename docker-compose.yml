@@ -1,0 +1,30 @@
+# Runs the Agent Vault web UI. The port is published on the HOST's loopback
+# only, so the UI is reachable at http://127.0.0.1:8787 but never from the
+# network. The policy engine, audit log and sign-in all still apply inside.
+#
+#   docker compose up --build
+#
+# Copy .env.example to .env first if you want the agent to have a key/LLM.
+services:
+  agentvault:
+    build: .
+    ports:
+      - "127.0.0.1:8787:8787"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Inside the container we must bind all interfaces; the host-side
+      # 127.0.0.1 publish above is what keeps it private.
+      WEB_HOST: 0.0.0.0
+    volumes:
+      # Accounts + audit log survive restarts.
+      - ./data:/app/data
+      # Policy is read-only from the container's point of view.
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/auth/setup').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

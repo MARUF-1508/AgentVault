@@ -85,8 +85,9 @@ async function main() {
       console.log('No web accounts yet. Create the first owner in the UI, or run `npm run cli -- user add <name> owner`.');
     }
     const server = createServer({ env, ctx: webCtx, approver, vault, users });
-    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
-    return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (loopback only, sign-in required; do not expose).`);
+    await new Promise<void>((resolve) => server.listen(port, env.WEB_HOST, resolve));
+    const where = env.WEB_HOST === '127.0.0.1' ? 'loopback only, sign-in required; do not expose' : `bound to ${env.WEB_HOST}`;
+    return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (${where}).`);
   }
   const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE, vault);
   const schedules = readSchedules(env.SCHEDULES_FILE);
