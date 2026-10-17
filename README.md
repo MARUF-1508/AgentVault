@@ -78,7 +78,8 @@ npm run cli -- pause                               # kill switch: deny everythin
 npm run cli -- resume
 npm run cli -- audit                               # last 20 audit entries
 npm run cli -- audit verify                        # detect tampering
-npm run cli -- serve [--port N]                    # web UI on http://127.0.0.1:5174 (loopback only)
+npm run cli -- serve [--port N]                    # web UI on http://127.0.0.1:5174 (loopback only, sign-in)
+npm run cli -- user add <name> <role>               # web UI account: owner | operator | viewer
 npm run evidence                                   # docs/EXECUTION_EVIDENCE.md with tx hashes
 ```
 
@@ -98,13 +99,16 @@ cd web && npm install && npm run build
 cd .. && npm run cli -- serve          # http://127.0.0.1:5174
 ```
 
-Chat with suggested demo prompts and the agent's tool calls, a portfolio card
-with today's spend against each budget, a policy-check panel that shows a
-transfer's tier without the LLM, a T2 approval dialog (Approve/Reject resolves
-the same executor queue as the CLI, and an unanswered request is rejected after
-two minutes), a pause button for the kill switch, and an audit trail with
-explorer links and a chain-integrity badge. The server binds loopback only and
-has no auth: a local demo, never expose it. See `web/README.md`.
+On first start, `serve` creates an `owner` account and prints its password
+once. Add more accounts with `npm run cli -- user add <name> <owner|operator|viewer>`.
+
+A multipage app (Dashboard, Agent, Transfer, Activity, Security, Settings) with
+a blue light and dark theme. It has sign-in with role-based access, chat with
+push-to-talk voice input and spoken replies, a tier preview that works without
+the LLM, and a T2 approval dialog that only owners can answer. An unanswered
+approval is rejected after two minutes. There is also a pause button and an
+audit trail with explorer links. The server binds loopback only; never expose
+it. See `web/README.md`.
 
 ### On-chain vault mode
 

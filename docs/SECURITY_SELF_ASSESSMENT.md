@@ -37,6 +37,9 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | Budget derived from the audit log; failed txs still count | ✅ |
 | Kill switch (`pause`); the web UI can pause but only the CLI can resume, and both are audit-logged | ✅ |
 | Web server refuses foreign `Host`/`Origin` and non-JSON POSTs (no cross-site approval or transfer); unanswered T2 approvals auto-reject after two minutes | ✅ |
+| Web sign-in: scrypt-hashed passwords, HttpOnly SameSite=Strict session cookie, failed-login throttle; accounts managed from the CLI only | ✅ |
+| Role-based access checked server-side on every route: viewer reads, operator previews/transacts/chats, only owner approves T2 or pauses; sign-ins, approvals and pauses are audit-logged with the user name | ✅ |
+| Voice input only fills the chat box; approvals always need an owner's click | ✅ |
 | Mainnet refused unless explicitly enabled | ✅ |
 | Key never printed; `.env` chmod 600 and git-ignored | ✅ |
 | Unlimited ERC-20 approvals forbidden | ✅ |
@@ -66,4 +69,5 @@ Evaluation order: kill switch → chain → rate limit → then **swaps**: polic
 | R11 | Address-poisoning detection is a heuristic (matching leading/trailing hex digits), so a carefully crafted near-miss could evade it | Low | Funds to a lookalike | New (non-allowlisted) recipients are still T2, so a human sees the full address before approving | Social engineering of the human remains |
 | R12 | The anomaly guard uses the same price source as the portfolio; a missing or manipulated price disables or skews it | Low | A large request slips the guard | Hard caps and daily budgets always apply; prices are labelled (`chainlink`/`fixed-testnet-table`) and the guard is off only when a price is genuinely missing | On mainnet, oracle manipulation is a real residual |
 | R13 | The local block list is static and cannot know a brand-new scam address | Medium | Interaction with a fresh scam | New recipients are T2; block list + denylist raise known-bad addresses to T3 immediately | Inherent to any local list |
-| R14 | The web UI server has no authentication | Low (loopback-only) | Anyone on the machine could approve a T2 or chat with the agent's key | Binds 127.0.0.1 only; refuses non-loopback `Host` and `Origin` and non-JSON POSTs, so other websites in the same browser cannot drive it (`test/web.test.ts`); README warns never to expose it; CLI remains the hardened path | Local processes and other loopback origins can still call it; add auth before any shared deployment |
+| R14 | Someone else on the machine, or a web page, drives the local web UI | Low (loopback-only) | A T2 approved or a transfer sent by the wrong person | Sign-in with roles, so only an owner can approve or pause; binds 127.0.0.1 only; refuses non-loopback `Host` and `Origin` and non-JSON POSTs (`test/web.test.ts`); README warns never to expose it | Plain HTTP on loopback; sessions are in memory; a stolen owner password still approves within the policy caps |
+| R15 | Spoken commands are misheard | Medium | Wrong amount or recipient requested | Voice only types into the chat; the request still goes through the policy engine, and every T2 shows the full details and needs an owner's click | A misheard T1 within the auto limit to an allowlisted recipient can execute |

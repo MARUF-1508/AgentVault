@@ -69,7 +69,8 @@ Stretch: payments route through AgentVault.sol, which re-enforces caps on-chain.
 | `src/audit/log.ts` | Append-only hash-chained JSONL log; also the budget source of truth |
 | `src/report/evidence.ts` | Pure renderer for `EXECUTION_EVIDENCE.md` (audit txs + externally-observed vault hashes) |
 | `src/chain/client.ts` | viem clients + mainnet refusal guard |
-| `src/web/server.ts` | Loopback-only demo server (no auth): same executor, `WebApprover` instead of CLI |
+| `src/web/server.ts` | Loopback-only UI server: sign-in, role checks per route, same executor, `WebApprover` instead of CLI |
+| `src/auth/rbac.ts`, `src/auth/users.ts` | Roles and permissions (pure); scrypt user store, sessions and login throttle |
 | `src/config.ts` | zod-validated env + policy loading |
 | `contracts/AgentVault.sol` | On-chain per-tx cap, daily limit, recipient allowlist, pause (owner = human) |
 
