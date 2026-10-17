@@ -65,6 +65,13 @@ export function linkify(text: string, explorer: string | null): ReactNode[] {
   });
 }
 
+/** Sets the tab title, e.g. "Activity · Agent Vault". */
+export function usePageTitle(title: string): void {
+  useEffect(() => {
+    document.title = title ? `${title} · Agent Vault` : 'Agent Vault';
+  }, [title]);
+}
+
 /** Polls `fn` every `ms` while mounted; `deps` changes trigger an immediate refresh. */
 export function usePoll<T>(fn: () => Promise<T>, ms: number, deps: unknown[] = []): [T | null, string, () => void] {
   const [value, setValue] = useState<T | null>(null);

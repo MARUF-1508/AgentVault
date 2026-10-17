@@ -55,6 +55,15 @@ export interface ActivityEntry {
   data: Record<string, unknown>;
 }
 
+export type Role = 'viewer' | 'operator' | 'owner';
+export type Permission = 'read' | 'preview' | 'transact' | 'chat' | 'approve' | 'pause';
+
+export interface Me {
+  user: string;
+  role: Role;
+  permissions: Permission[];
+}
+
 export type Tier = 'T1_AUTO' | 'T2_CONFIRM' | 'T3_DENY';
 
 export type TransferIntent =
@@ -71,7 +80,9 @@ export interface TransactResult {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...init });
+  const r = await fetch(path, { headers: { 'content-type': 'application/json' }, credentials: 'same-origin', ...init });
+  // A lapsed session anywhere sends the app back to the sign-in page.
+  if (r.status === 401 && !path.startsWith('/api/auth/')) window.dispatchEvent(new Event('av:unauthorized'));
   const data = (await r.json()) as T & { error?: string; issues?: string[] };
   if (!r.ok) throw new Error([data.error ?? `HTTP ${r.status}`, ...(data.issues ?? [])].join(': '));
   return data;
@@ -88,6 +99,9 @@ async function read<T>(path: string): Promise<T> {
 
 const post = <T>(path: string, body: unknown) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
+export const getMe = () => api<Me>('/api/auth/me');
+export const login = (username: string, password: string) => post<Me>('/api/auth/login', { username, password });
+export const logout = () => post<{ ok: boolean }>('/api/auth/logout', {});
 export const getStatus = () => read<Status>('/api/status');
 export const getPortfolio = () => read<Portfolio>('/api/portfolio');
 export const getPolicy = () => read<Policy>('/api/policy');

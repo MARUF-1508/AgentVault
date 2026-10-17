@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { getActivity, getVerify, type ActivityEntry } from '../api';
+import { useWallet } from '../data';
 import { linkify, shortAddr, TierBadge, usePoll } from '../format';
 
 interface IntentLike {
@@ -31,6 +32,7 @@ const LABELS: Record<string, string> = {
   tx_failed: 'Failed',
   schedule: 'Schedule',
   kill_switch: 'Kill switch',
+  access: 'Access',
 };
 
 function detail(e: ActivityEntry, explorer: string | null): ReactNode {
@@ -62,7 +64,10 @@ function detail(e: ActivityEntry, explorer: string | null): ReactNode {
     case 'tx_failed':
       return `${String(d.stage ?? '')}: ${String(d.error ?? d.hash ?? '')}`;
     case 'kill_switch':
-      return `${d.paused ? 'paused' : 'resumed'}${d.by ? ` from the ${String(d.by)}` : ''}`;
+      return `${d.paused ? 'paused' : 'resumed'}${d.by ? ` from the ${String(d.by)}` : ''}${d.user ? ` by ${String(d.user)}` : ''}`;
+    case 'access':
+      if (d.event === 'decide') return `${String(d.user)} ${d.approved ? 'approved' : 'rejected'} a T2 request`;
+      return `${String(d.user)} sign-in ${d.ok ? 'succeeded' : 'failed'}${d.reason ? ` (${String(d.reason)})` : ''}`;
     default:
       return JSON.stringify(d).slice(0, 80);
   }
@@ -72,11 +77,13 @@ const FILTERS: Record<string, (e: ActivityEntry) => boolean> = {
   All: () => true,
   'On-chain': (e) => e.type.startsWith('tx_'),
   Refused: (e) => e.type === 'decision' && e.data.tier === 'T3_DENY',
-  'Human decisions': (e) => e.type === 'approval' || e.type === 'kill_switch',
+  'Human decisions': (e) => e.type === 'approval' || e.type === 'kill_switch' || e.type === 'access',
 };
 
-export default function AuditTimeline({ refreshKey, explorer }: { refreshKey: number; explorer: string | null }) {
-  const [entries] = usePoll(() => getActivity(50), 5_000, [refreshKey]);
+export default function AuditTimeline({ limit = 50, compact = false }: { limit?: number; compact?: boolean }) {
+  const { refreshKey, status } = useWallet();
+  const explorer = status?.explorer ?? null;
+  const [entries] = usePoll(() => getActivity(limit), 5_000, [refreshKey, limit]);
   const [verify] = usePoll(getVerify, 10_000, [refreshKey]);
   const [filter, setFilter] = useState('All');
   const shown = (entries ?? []).filter(FILTERS[filter]!).reverse();
@@ -84,8 +91,9 @@ export default function AuditTimeline({ refreshKey, explorer }: { refreshKey: nu
   return (
     <section className="card">
       <div className="row spread wrap">
-        <h2>Audit trail</h2>
+        <h2>{compact ? 'Recent activity' : 'Audit trail'}</h2>
         <div className="row wrap">
+          {!compact && (
           <div className="segmented" role="tablist">
             {Object.keys(FILTERS).map((f) => (
               <button key={f} role="tab" aria-selected={f === filter} className={f === filter ? 'on' : ''} onClick={() => setFilter(f)}>
@@ -93,6 +101,7 @@ export default function AuditTimeline({ refreshKey, explorer }: { refreshKey: nu
               </button>
             ))}
           </div>
+          )}
           <span
             className={verify === null ? 'badge' : verify.ok ? 'badge ok' : 'badge bad'}
             title="Every entry commits to the previous one by SHA-256, so an edit anywhere breaks the chain"
@@ -104,7 +113,7 @@ export default function AuditTimeline({ refreshKey, explorer }: { refreshKey: nu
       {shown.length === 0 ? (
         <p className="muted">Nothing here yet.</p>
       ) : (
-        <ol className="timeline">
+        <ol className={`timeline ${compact ? 'compact' : ''}`}>
           {shown.map((e) => (
             <li key={e.seq} className={`t-${e.type}`}>
               <span className="seq muted mono">#{e.seq}</span>

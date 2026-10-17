@@ -1,21 +1,7 @@
-# Agent Vault web UI (Day 4)
+# Agent Vault web UI
 
-Local demo interface. Free tools only (Vite + React, no paid services).
-
-- **Header**: chain, wallet address, vault or direct mode, model status, and a
-  **Pause wallet** button (kill switch). Resuming is CLI-only on purpose.
-- **Chat**: suggested prompts that match the demo script, the agent's tool calls
-  under each answer, and clickable explorer links for hashes and addresses.
-- **Portfolio**: balances with USD value and meters for today's spend against
-  each daily budget and the hourly rate limit.
-- **Policy check**: pick an amount, asset and recipient and see the tier and
-  reasons without the LLM; T1 and T2 results can then be submitted to the
-  executor.
-- **Approval dialog**: action, amount, target address split into groups (the
-  first and last groups highlighted, to make address poisoning visible), reasons
-  as a list, and a countdown. Reject has focus by default and Escape rejects.
-- **Audit trail**: readable entries, tier badges, explorer links, filters, and
-  the hash-chain badge. Refreshes every few seconds.
+A local multipage interface built with free tools only: Vite, React, React
+Router, Framer Motion, lucide-react icons and Sonner toasts.
 
 ## Run it
 
@@ -25,22 +11,70 @@ npm run build            # produces dist/, served by the wallet server
 cd .. && npm run cli -- serve
 ```
 
-Open http://127.0.0.1:5174. For hot-reload frontend work, run `npm run dev`
-in `web/` (port 5173, proxies `/api` to the wallet server).
+Open http://127.0.0.1:5174. The first `serve` creates an `owner` account and
+prints its password once. Manage accounts from the terminal:
+
+```bash
+npm run cli -- user add alice operator   # prints a generated password
+npm run cli -- user list
+npm run cli -- user remove alice
+```
+
+For hot-reload frontend work, run `npm run dev` in `web/` (port 5173, proxies
+`/api` to the wallet server).
+
+## Pages
+
+| Page | What it shows |
+|---|---|
+| Dashboard | KPIs (budget used, rate limit, kill switch, audit chain), holdings, spend meters, recent activity |
+| Agent | Chat with suggested prompts, the agent's tool calls, push-to-talk voice and spoken replies |
+| Transfer | Tier preview for any transfer without the LLM, then submit to the executor |
+| Activity | The full audit trail with filters, explorer links and the hash-chain badge |
+| Security | Tier explanations, limits per asset, allow/deny lists, the role matrix, vault status |
+| Settings | Light, dark or system theme, a voice test, account and wallet details |
+
+Navigation is a sidebar on desktop and a slide-in drawer on phones. Pages
+animate in and out, and every page sets its own tab title. Animations respect
+the system's reduced-motion setting.
+
+## Roles
+
+| Role | Can |
+|---|---|
+| viewer | read balances, policy, budgets and the audit trail |
+| operator | viewer, plus preview, submit transfers and chat with the agent |
+| owner | operator, plus approve or reject T2 and pause the wallet |
+
+The server checks the role on every request (`src/auth/rbac.ts`). Hiding
+buttons in the UI is only a convenience. No role can resume the wallet, change
+limits or add users from the browser; those stay CLI-only.
+
+## Voice
+
+The microphone button uses the browser's own speech recognition (Chrome and
+Edge work best), and replies can be read aloud with the browser's speech
+synthesis. No audio reaches the wallet server. Voice only types into the chat:
+approving a T2 always needs an owner's click.
 
 ## How approvals work
 
 T2 transactions park in a shared `WebApprover` queue on the server. The
-approval dialog polls `GET /api/pending` and answers with `POST /api/decide`.
-A rejected approval resolves the executor with `rejected_by_human` and nothing
-is signed (see `test/approver.test.ts`). A request nobody answers within two
-minutes is rejected the same way.
+approval dialog polls `GET /api/pending` and an owner answers with
+`POST /api/decide`. A rejected approval resolves the executor with
+`rejected_by_human` and nothing is signed (see `test/approver.test.ts`). A
+request nobody answers within two minutes is rejected the same way. Each
+decision is logged with the owner's name.
 
-## Security note
+## Security notes
 
-The server binds **127.0.0.1 only and has no auth**. It is a local demo, not
-hardened for hosting: never expose it beyond your machine. It refuses requests
-whose `Host` or `Origin` is not loopback and POSTs that are not
-`application/json`, so another website open in the same browser cannot approve
-a T2 or send a transaction through it. Every state change
-still passes through the policy engine and the executor, exactly as in the CLI.
+- The server binds **127.0.0.1 only**. It is a local demo, not hardened for
+  hosting: never expose it beyond your machine.
+- Passwords are stored as salted scrypt hashes in git-ignored `data/users.json`.
+  Sessions use an HttpOnly, SameSite=Strict cookie and last 8 hours. Five
+  failed sign-ins for a name lock it for 15 minutes.
+- The server refuses a `Host` or `Origin` that is not loopback, and any POST
+  that is not `application/json`. Another website open in the same browser
+  therefore cannot approve a T2 or send a transaction.
+- Every state change still passes through the policy engine and the executor,
+  exactly as in the CLI.

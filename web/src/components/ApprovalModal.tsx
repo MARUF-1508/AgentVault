@@ -1,5 +1,10 @@
+import { AnimatePresence, motion } from 'framer-motion';
+import { ShieldAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { decide, getPending } from '../api';
+import { useAuth } from '../auth';
+import { useWallet } from '../data';
 import { splitReasons, TierBadge } from '../format';
 
 /** Matches the WebApprover default in src/approval/approver.ts. */
@@ -36,14 +41,18 @@ function AddressBlocks({ value }: { value: string }) {
   );
 }
 
-export default function ApprovalModal({ onDecided }: { onDecided: () => void }) {
+export default function ApprovalModal() {
+  const { can, me } = useAuth();
+  const { refresh } = useWallet();
   const [pending, setPending] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const rejectRef = useRef<HTMLButtonElement>(null);
+  const mayApprove = can('approve');
 
   useEffect(() => {
+    if (!me) return;
     const poll = () =>
       getPending()
         .then((r) => {
@@ -58,91 +67,114 @@ export default function ApprovalModal({ onDecided }: { onDecided: () => void }) 
       clearInterval(t);
       clearInterval(clock);
     };
-  }, []);
+  }, [me]);
 
   // Focus the safe choice first, so a stray Enter rejects.
   useEffect(() => {
     if (pending) rejectRef.current?.focus();
   }, [pending]);
 
-  if (!pending) return null;
-  const f = parse(pending);
-  const left = expiresAt ? Math.max(0, expiresAt - now) : 0;
-
   const answer = (approved: boolean) => {
     setBusy(true);
     decide(approved)
       .then(() => {
         setPending(null);
-        onDecided();
+        toast[approved ? 'success' : 'message'](approved ? 'Approved. Signing and broadcasting…' : 'Rejected. Nothing was signed.');
+        refresh();
       })
-      .catch(() => {})
+      .catch((e: Error) => toast.error(e.message))
       .finally(() => setBusy(false));
   };
 
+  const f = pending ? parse(pending) : {};
+  const left = expiresAt ? Math.max(0, expiresAt - now) : 0;
+
   return (
-    <div
-      className="overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="approval-title"
-      onKeyDown={(e) => e.key === 'Escape' && answer(false)}
-    >
-      <section className="card approval">
-        <div className="row spread">
-          <h2 id="approval-title">Your approval is needed</h2>
-          <TierBadge tier={f.Tier ?? 'T2_CONFIRM'} />
-        </div>
-        <p className="muted">The policy engine allows this only with a human's yes. Check the recipient carefully.</p>
-        <dl className="fields">
-          <dt>Action</dt>
-          <dd>{(f.Action ?? '').replace(/_/g, ' ')}</dd>
-          <dt>Amount</dt>
-          <dd className="amount">{f.Amount}</dd>
-          <dt>Target</dt>
-          <dd>
-            <AddressBlocks value={f.Target ?? ''} />
-          </dd>
-          {f.Via && (
-            <>
-              <dt>Via</dt>
-              <dd>
-                <AddressBlocks value={f.Via} />
-              </dd>
-            </>
-          )}
-          {f['Min out'] && (
-            <>
-              <dt>Min out</dt>
-              <dd>{f['Min out']}</dd>
-            </>
-          )}
-          <dt>Chain</dt>
-          <dd>{f.Chain}</dd>
-        </dl>
-        <h3>Why it needs you</h3>
-        <ul className="reasons">
-          {splitReasons(f.Why ?? '').map((r, i) => (
-            <li key={i}>{r}</li>
-          ))}
-        </ul>
-        {expiresAt && (
-          <div className="countdown" title="Unanswered requests are rejected automatically">
-            <div className="bar">
-              <span style={{ width: `${(left / WINDOW_MS) * 100}%` }} />
+    <AnimatePresence>
+      {pending && (
+        <motion.div
+          // Owners get a blocking dialog; others get a corner card that does not block the page.
+          className={mayApprove ? 'overlay' : 'floating'}
+          role="dialog"
+          aria-modal={mayApprove}
+          aria-labelledby="approval-title"
+          onKeyDown={(e) => e.key === 'Escape' && mayApprove && answer(false)}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.section
+            className="card approval"
+            initial={{ opacity: 0, scale: 0.94, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+          >
+            <div className="row spread">
+              <h2 id="approval-title" className="row">
+                <ShieldAlert size={20} aria-hidden /> {mayApprove ? 'Your approval is needed' : 'Waiting for an owner'}
+              </h2>
+              <TierBadge tier={f.Tier ?? 'T2_CONFIRM'} />
             </div>
-            <span className="muted small">Rejected automatically in {Math.ceil(left / 1000)}s</span>
-          </div>
-        )}
-        <div className="row end">
-          <button ref={rejectRef} className="reject" disabled={busy} onClick={() => answer(false)}>
-            Reject
-          </button>
-          <button className="approve" disabled={busy} onClick={() => answer(true)}>
-            Approve and sign
-          </button>
-        </div>
-      </section>
-    </div>
+            <p className="muted">The policy engine allows this only with a human's yes. Check the recipient carefully.</p>
+            <dl className="fields">
+              <dt>Action</dt>
+              <dd>{(f.Action ?? '').replace(/_/g, ' ')}</dd>
+              <dt>Amount</dt>
+              <dd className="amount">{f.Amount}</dd>
+              <dt>Target</dt>
+              <dd>
+                <AddressBlocks value={f.Target ?? ''} />
+              </dd>
+              {f.Via && (
+                <>
+                  <dt>Via</dt>
+                  <dd>
+                    <AddressBlocks value={f.Via} />
+                  </dd>
+                </>
+              )}
+              {f['Min out'] && (
+                <>
+                  <dt>Min out</dt>
+                  <dd>{f['Min out']}</dd>
+                </>
+              )}
+              <dt>Chain</dt>
+              <dd>{f.Chain}</dd>
+            </dl>
+            <h3>Why it needs you</h3>
+            <ul className="reasons">
+              {splitReasons(f.Why ?? '').map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+            {expiresAt && (
+              <div className="countdown" title="Unanswered requests are rejected automatically">
+                <div className="bar">
+                  <span style={{ width: `${(left / WINDOW_MS) * 100}%` }} />
+                </div>
+                <span className="muted small">Rejected automatically in {Math.ceil(left / 1000)}s</span>
+              </div>
+            )}
+            {mayApprove ? (
+              <>
+                <div className="row end">
+                  <button ref={rejectRef} className="reject" disabled={busy} onClick={() => answer(false)}>
+                    Reject
+                  </button>
+                  <button className="approve" disabled={busy} onClick={() => answer(true)}>
+                    Approve and sign
+                  </button>
+                </div>
+                <p className="muted small">Approvals need a click. Voice commands can never approve.</p>
+              </>
+            ) : (
+              <p className="notice">Your role ({me?.role}) cannot approve. An owner must decide before it is rejected automatically.</p>
+            )}
+          </motion.section>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

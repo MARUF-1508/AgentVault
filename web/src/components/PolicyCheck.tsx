@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from 'react';
-import { preview, transact, type Policy, type Status, type TransactResult, type Tier, type TransferIntent } from '../api';
+import { toast } from 'sonner';
+import { preview, transact, type TransactResult, type Tier, type TransferIntent } from '../api';
+import { useAuth } from '../auth';
+import { useWallet } from '../data';
 import { linkify, TierBadge } from '../format';
 
 const CUSTOM = '__custom__';
@@ -9,7 +12,9 @@ const CUSTOM = '__custom__';
  * optionally submit it. Submitting goes through the same policy, simulation and
  * T2 approval as the agent does.
  */
-export default function PolicyCheck({ policy, status, onActivity }: { policy: Policy | null; status: Status | null; onActivity: () => void }) {
+export default function PolicyCheck() {
+  const { policy, status, refresh: onActivity } = useWallet();
+  const { can } = useAuth();
   const labels = Object.keys(policy?.recipients.allowlist ?? {});
   const assets = policy ? [policy.native.symbol, ...Object.keys(policy.tokens)] : [];
   const [asset, setAsset] = useState('');
@@ -51,7 +56,11 @@ export default function PolicyCheck({ policy, status, onActivity }: { policy: Po
     setError('');
     setBusy(true);
     transact(intent())
-      .then(setResult)
+      .then((r) => {
+        setResult(r);
+        if (r.status === 'executed') toast.success('Transaction confirmed on-chain.');
+        else toast.message(`Result: ${r.status.replace(/_/g, ' ')}`);
+      })
       .catch((err: Error) => setError(err.message))
       .finally(() => {
         setBusy(false);
@@ -61,7 +70,7 @@ export default function PolicyCheck({ policy, status, onActivity }: { policy: Po
 
   return (
     <section className="card">
-      <h2>Policy check</h2>
+      <h2>Check and send</h2>
       <p className="muted small">See which tier a transfer lands in before anything is signed. No model needed.</p>
       <form className="check" onSubmit={check} onChange={reset}>
         <label>
@@ -97,7 +106,7 @@ export default function PolicyCheck({ policy, status, onActivity }: { policy: Po
           <button type="submit" disabled={busy || !to}>
             Check tier
           </button>
-          {verdict && verdict.tier !== 'T3_DENY' && (
+          {verdict && verdict.tier !== 'T3_DENY' && can('transact') && (
             <button type="button" className="ghost" disabled={busy} onClick={submit}>
               {verdict.tier === 'T1_AUTO' ? 'Send it' : 'Send for approval'}
             </button>
