@@ -1,4 +1,7 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebApprover } from '../src/approval/approver.js';
 import type { AuditLog } from '../src/audit/log.js';
@@ -7,7 +10,7 @@ import type { Env } from '../src/config.js';
 import type { Executor } from '../src/executor/executor.js';
 import { PolicySchema } from '../src/policy/types.js';
 import { createServer } from '../src/web/server.js';
-import type { Server } from 'node:http';
+import { request, type Server } from 'node:http';
 
 const policy = PolicySchema.parse({
   version: 1,
@@ -25,13 +28,22 @@ const env = {
   LLM_MODEL: 'gpt-4o-mini',
   POLICY_FILE: 'config/policy.json',
   AUDIT_LOG: 'data/audit.jsonl',
-  PAUSE_FILE: 'data/PAUSED',
+  PAUSE_FILE: join(mkdtempSync(join(tmpdir(), 'aw-web-')), 'PAUSED'),
   ALLOW_MAINNET: 'false',
 } as Env;
 
+const appends: { type: string; data: Record<string, unknown> }[] = [];
+
 function stubCtx(executor: Partial<Executor>): { ctx: ToolContext; approver: WebApprover } {
   const approver = new WebApprover();
-  const audit = { read: () => [], verify: () => ({ ok: true }) } as unknown as AuditLog;
+  const audit = {
+    read: () => [],
+    verify: () => ({ ok: true }),
+    append: (type: string, data: Record<string, unknown>) => {
+      appends.push({ type, data });
+      return {};
+    },
+  } as unknown as AuditLog;
   const clients = {
     chain: { id: 84532, name: 'Base Sepolia' },
     publicClient: {},
@@ -64,10 +76,68 @@ describe('web server', () => {
 
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
+    rmSync(env.PAUSE_FILE, { force: true });
+  });
+
+  const postJson = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+
+  it('refuses a cross-site no-cors POST that would approve a waiting T2', async () => {
+    // A web page can send text/plain without a preflight; the server must not parse it.
+    const r = await fetch(`${base}/api/decide`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ approved: true }),
+    });
+    expect(r.status).toBe(415);
+  });
+
+  it('refuses requests from a foreign Origin or a rebound Host', async () => {
+    const foreign = await postJson('/api/decide', { approved: true }, { origin: 'https://evil.example' });
+    expect(foreign.status).toBe(403);
+    // fetch cannot override Host, so send the rebinding case with node:http.
+    const port = (server.address() as AddressInfo).port;
+    const rebound = await new Promise<number>((resolve, reject) => {
+      request({ host: '127.0.0.1', port, path: '/api/pending', headers: { host: 'evil.example' } }, (r) => {
+        r.resume();
+        resolve(r.statusCode ?? 0);
+      })
+        .on('error', reject)
+        .end();
+    });
+    expect(rebound).toBe(403);
+    const local = await fetch(`${base}/api/pending`, { headers: { origin: 'http://localhost:5173' } });
+    expect(local.status).toBe(200);
+  });
+
+  it('reports status and a budget view built from the audit log', async () => {
+    const status = await (await fetch(`${base}/api/status`)).json();
+    expect(status).toMatchObject({ chainId: 84532, paused: false, vault: null, llm: false });
+    const budget = await (await fetch(`${base}/api/budget`)).json();
+    expect(budget).toMatchObject({
+      paused: false,
+      txLastHour: 0,
+      maxTxPerHour: 5,
+      assets: [{ asset: 'ETH', spentToday: '0', dailyBudget: '0.02', autoMaxPerTx: '0.001', hardMaxPerTx: '0.01' }],
+    });
+  });
+
+  it('pauses the wallet from the UI and logs it; there is no resume route', async () => {
+    const r = await postJson('/api/pause', {});
+    expect(await r.json()).toEqual({ paused: true });
+    expect(existsSync(env.PAUSE_FILE)).toBe(true);
+    expect(appends).toContainEqual({ type: 'kill_switch', data: { paused: true, by: 'web' } });
+    expect((await (await fetch(`${base}/api/status`)).json()).paused).toBe(true);
+    expect((await postJson('/api/resume', {})).status).toBe(404);
+    rmSync(env.PAUSE_FILE, { force: true });
   });
 
   it('reports no pending approval and rejects decide with nothing waiting', async () => {
-    expect(await (await fetch(`${base}/api/pending`)).json()).toEqual({ pending: null });
+    expect(await (await fetch(`${base}/api/pending`)).json()).toEqual({ pending: null, expiresAt: null });
     const r = await fetch(`${base}/api/decide`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -111,6 +181,7 @@ describe('web server', () => {
       pending = (await (await fetch(`${base}/api/pending`)).json()) as typeof pending;
     }
     expect(pending.pending).toContain('T2_CONFIRM');
+    expect((pending as { expiresAt?: number }).expiresAt).toBeGreaterThan(Date.now());
     const decided = await (
       await fetch(`${base}/api/decide`, {
         method: 'POST',
@@ -120,7 +191,7 @@ describe('web server', () => {
     ).json();
     expect(decided).toEqual({ decided: true });
     await expect(tx).resolves.toMatchObject({ status: 'rejected_by_human' });
-    expect(await (await fetch(`${base}/api/pending`)).json()).toEqual({ pending: null });
+    expect(await (await fetch(`${base}/api/pending`)).json()).toEqual({ pending: null, expiresAt: null });
   });
 
   it('refuses chat without an LLM key instead of calling the network', async () => {

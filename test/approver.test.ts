@@ -92,4 +92,19 @@ describe('WebApprover', () => {
     expect(approver.decide(true)).toBe(true);
     await expect(first).resolves.toBe(true);
   });
+
+  it('an unanswered request is rejected after the timeout and the slot clears', async () => {
+    vi.useFakeTimers();
+    try {
+      const approver = new WebApprover(1000);
+      const pending = approver.confirm('summary');
+      expect(approver.getPendingDetail()?.expiresAt).toBe(Date.now() + 1000);
+      vi.advanceTimersByTime(1000);
+      await expect(pending).resolves.toBe(false);
+      expect(approver.getPendingDetail()).toBeNull();
+      expect(approver.decide(true)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

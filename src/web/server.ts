@@ -3,11 +3,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { normalize, sep } from 'node:path';
 import type OpenAI from 'openai';
+import { formatUnits } from 'viem';
 import { z } from 'zod';
 import { chatTurn } from '../agent/agent.js';
 import { runTool, type ToolContext } from '../agent/tools.js';
 import type { WebApprover } from '../approval/approver.js';
 import type { Env } from '../config.js';
+import { pauseWallet } from '../policy/killswitch.js';
+import { spendStateFrom } from '../policy/state.js';
 import { IntentSchema } from '../policy/types.js';
 
 export interface WebServerOptions {
@@ -16,6 +19,8 @@ export interface WebServerOptions {
   approver: WebApprover;
   /** Directory with the built UI (`web/dist`). Missing dir => JSON hint. */
   distDir?: string;
+  /** Set in VAULT=true mode, so the UI can show that on-chain caps apply. */
+  vault?: { address: `0x${string}` };
 }
 
 const DecideSchema = z.object({ approved: z.boolean() });
@@ -27,6 +32,37 @@ const stringify = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'bi
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(stringify(body));
+}
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+function hostnameOf(value: string | undefined, withScheme: boolean): string | null {
+  if (!value) return null;
+  try {
+    return new URL(withScheme ? value : `http://${value}`).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Browser-facing guard for a server with no auth. A Host header that is not
+ * loopback means DNS rebinding; an Origin that is not loopback means another
+ * website is calling us. POSTs must be JSON, which forces a CORS preflight that
+ * this server never answers, so a cross-site form or no-cors fetch cannot
+ * approve a T2 or trigger a transaction.
+ */
+function rejectForeign(req: IncomingMessage): { status: number; error: string } | null {
+  const host = hostnameOf(req.headers.host, false);
+  if (!host || !LOOPBACK.has(host)) return { status: 403, error: 'Host must be loopback.' };
+  const origin = req.headers.origin;
+  if (origin !== undefined && !LOOPBACK.has(hostnameOf(origin, true) ?? '')) {
+    return { status: 403, error: 'Cross-origin requests are refused.' };
+  }
+  if (req.method === 'POST' && !(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+    return { status: 415, error: 'POST bodies must be application/json.' };
+  }
+  return null;
 }
 
 function readBody(req: IncomingMessage): Promise<unknown> {
@@ -72,12 +108,36 @@ const STATIC_TYPES: Record<string, string> = {
 export function createServer(opts: WebServerOptions): Server {
   const { env, ctx, approver } = opts;
   const distDir = opts.distDir ?? 'web/dist';
+  const vault = opts.vault;
   const sessions = new Map<string, OpenAI.Chat.Completions.ChatCompletionMessageParam[]>();
 
   return createHttpServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost');
       const path = url.pathname;
+      const foreign = rejectForeign(req);
+      if (foreign) return send(res, foreign.status, { error: foreign.error });
+
+      if (req.method === 'GET' && path === '/api/status') {
+        const { chain, account } = ctx.clients;
+        return send(res, 200, {
+          address: account?.address ?? null,
+          chain: chain.name,
+          chainId: chain.id,
+          explorer: chain.blockExplorers?.default.url ?? null,
+          paused: spendStateFrom([], env.PAUSE_FILE).paused,
+          vault: vault?.address ?? null,
+          llm: Boolean(env.LLM_API_KEY),
+          model: env.LLM_API_KEY ? env.LLM_MODEL : null,
+        });
+      }
+      if (req.method === 'GET' && path === '/api/budget') {
+        return send(res, 200, budgetView(ctx, env.PAUSE_FILE));
+      }
+      if (req.method === 'POST' && path === '/api/pause') {
+        pauseWallet(env.PAUSE_FILE, ctx.audit, 'web');
+        return send(res, 200, { paused: true });
+      }
 
       if (req.method === 'GET' && path === '/api/info') {
         return send(res, 200, await runTool('get_wallet_info', '{}', ctx));
@@ -96,7 +156,8 @@ export function createServer(opts: WebServerOptions): Server {
         return send(res, 200, ctx.audit.verify());
       }
       if (req.method === 'GET' && path === '/api/pending') {
-        return send(res, 200, { pending: approver.getPending() });
+        const detail = approver.getPendingDetail();
+        return send(res, 200, { pending: detail?.summary ?? null, expiresAt: detail?.expiresAt ?? null });
       }
       if (req.method === 'POST' && path === '/api/decide') {
         const parsed = DecideSchema.safeParse(await readBody(req));
@@ -130,9 +191,10 @@ export function createServer(opts: WebServerOptions): Server {
         if (!env.LLM_API_KEY) return send(res, 400, { error: 'LLM_API_KEY is not set; chat needs a model endpoint.' });
         const session = parsed.data.session ?? randomUUID();
         const history = sessions.get(session) ?? [];
-        const answer = await chatTurn(env, ctx, history, parsed.data.message);
+        const events: string[] = [];
+        const answer = await chatTurn(env, ctx, history, parsed.data.message, (e) => events.push(e));
         sessions.set(session, history);
-        return send(res, 200, { session, answer });
+        return send(res, 200, { session, answer, events });
       }
 
       if (req.method === 'GET') {
@@ -154,6 +216,28 @@ export function createServer(opts: WebServerOptions): Server {
       return send(res, 500, { error: message });
     }
   });
+}
+
+/** Today's spend per asset against its limits, rebuilt from the audit log. */
+function budgetView(ctx: ToolContext, pauseFile: string) {
+  const { policy } = ctx;
+  const state = spendStateFrom(ctx.audit.read(), pauseFile);
+  const assets = [
+    { asset: policy.native.symbol, decimals: 18, limits: policy.native },
+    ...Object.entries(policy.tokens).map(([asset, t]) => ({ asset, decimals: t.decimals, limits: t })),
+  ];
+  return {
+    paused: state.paused,
+    txLastHour: state.txLastHour,
+    maxTxPerHour: policy.rateLimit.maxTxPerHour,
+    assets: assets.map(({ asset, decimals, limits }) => ({
+      asset,
+      spentToday: formatUnits(state.spentToday[asset] ?? 0n, decimals),
+      dailyBudget: limits.dailyBudget,
+      autoMaxPerTx: limits.autoMaxPerTx,
+      hardMaxPerTx: limits.hardMaxPerTx,
+    })),
+  };
 }
 
 function serveStatic(distDir: string, path: string): { type: string; body: Buffer } | null {

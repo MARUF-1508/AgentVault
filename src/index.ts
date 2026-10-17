@@ -1,5 +1,4 @@
-import { rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import type OpenAI from 'openai';
@@ -12,6 +11,7 @@ import { makeClients } from './chain/client.js';
 import { loadEnv, loadPolicy } from './config.js';
 import { Executor } from './executor/executor.js';
 import { tokenInfo } from './policy/engine.js';
+import { pauseWallet, resumeWallet } from './policy/killswitch.js';
 import { IntentSchema, type Intent } from './policy/types.js';
 import { loadSchedules, type Schedules } from './schedule/rules.js';
 import { createServer } from './web/server.js';
@@ -43,14 +43,11 @@ async function main() {
 
   // Commands that need no chain connection
   if (cmd === 'pause') {
-    mkdirSync(dirname(env.PAUSE_FILE), { recursive: true });
-    writeFileSync(env.PAUSE_FILE, new Date().toISOString());
-    audit.append('kill_switch', { paused: true });
+    pauseWallet(env.PAUSE_FILE, audit, 'cli');
     return void console.log('Wallet paused. All transactions will be denied until `resume`.');
   }
   if (cmd === 'resume') {
-    rmSync(env.PAUSE_FILE, { force: true });
-    audit.append('kill_switch', { paused: false });
+    resumeWallet(env.PAUSE_FILE, audit);
     return void console.log('Wallet resumed.');
   }
   if (cmd === 'audit') {
@@ -69,7 +66,7 @@ async function main() {
     const approver = new WebApprover();
     const webExecutor = new Executor(clients, policy, audit, approver, env.PAUSE_FILE, vault);
     const webCtx: ToolContext = { clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) };
-    const server = createServer({ env, ctx: webCtx, approver });
+    const server = createServer({ env, ctx: webCtx, approver, vault });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (loopback only, no auth: local demo, do not expose).`);
   }
