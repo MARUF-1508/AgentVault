@@ -29,6 +29,7 @@ const USAGE = `Agent Wallet
   npm run cli -- swap <tokenIn> <tokenOut> <amountIn> [slippageBps] [--dry-run]
   npm run cli -- preview <to> <amount> [TOKEN]     policy tier only, nothing sent
   npm run cli -- schedule [list|run]               scheduled / conditional rules
+  npm run cli -- x402 [url]                        fetch a paid (x402-style) API resource; the wallet pays if it gets a 402
   npm run cli -- pause | resume                    kill switch
   npm run cli -- audit [verify|tail]               audit log
   npm run cli -- serve [--port N]                  web UI (loopback only, sign-in required)
@@ -70,7 +71,14 @@ async function main() {
     const port = portRaw ? Math.min(Math.max(parseInt(portRaw, 10), 1), 65535) : 5174;
     const approver = new WebApprover();
     const webExecutor = new Executor(clients, policy, audit, approver, env.PAUSE_FILE, vault);
-    const webCtx: ToolContext = { clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) };
+    const webCtx: ToolContext = {
+      clients,
+      policy,
+      executor: webExecutor,
+      audit,
+      schedules: readSchedules(env.SCHEDULES_FILE),
+      x402ApiUrl: env.X402_API_URL,
+    };
     const users = new UserStore(env.USERS_FILE);
     if (users.list().length === 0) {
       // The UI shows a first-run setup screen; the CLI path also works.
@@ -82,7 +90,7 @@ async function main() {
   }
   const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE, vault);
   const schedules = readSchedules(env.SCHEDULES_FILE);
-  const ctx: ToolContext = { clients, policy, executor, audit, schedules };
+  const ctx: ToolContext = { clients, policy, executor, audit, schedules, x402ApiUrl: env.X402_API_URL };
   const dryRun = rest.includes('--dry-run');
   const args = rest.filter((a) => a !== '--dry-run');
 
@@ -114,6 +122,8 @@ async function main() {
       }
       return print(schedules);
     }
+    case 'x402':
+      return print(await runTool('fetch_paid_data', JSON.stringify({ url: args[0] ?? env.X402_API_URL }), ctx));
     case 'chat':
       return chat(env, ctx);
     default:

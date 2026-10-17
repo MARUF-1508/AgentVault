@@ -19,6 +19,9 @@ const EnvSchema = z.object({
   PAUSE_FILE: z.string().default('data/PAUSED'),
   // Web-UI accounts (scrypt hashes). Managed with `npm run cli -- user ...`.
   USERS_FILE: z.string().default('data/users.json'),
+  // Base URL of the x402-style paid API the fetch_paid_data tool may call
+  // (SSRF guard: requests to any other origin are refused).
+  X402_API_URL: z.string().url().optional(),
   ALLOW_MAINNET: z.string().default('false'),
   // Executor vault-routing mode (VAULT=true sends native transfers via agentSend).
   VAULT: z.string().default('false'),

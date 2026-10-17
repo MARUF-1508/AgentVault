@@ -25,7 +25,8 @@
   },
   "recipients": {
     "allowlist": {
-      "alice": "0x4785Dca37A242F3D80f844CB0b143A687008a2B5"
+      "alice": "0x4785Dca37A242F3D80f844CB0b143A687008a2B5",
+      "x402-marketplace": "0x4785Dca37A242F3D80f844CB0b143A687008a2B5"
     },
     "denylist": ["0x000000000000000000000000000000000000dEaD"]
   },

@@ -8,6 +8,7 @@ import { ActionIntentSchema, SwapIntentSchema, type Policy } from '../policy/typ
 import { getPortfolio } from '../portfolio/portfolio.js';
 import { resolveRecipient } from './resolve.js';
 import type { Schedules } from '../schedule/rules.js';
+import { fetchPaidData } from '../x402.js';
 
 const actionParams = {
   type: 'object',
@@ -151,6 +152,22 @@ export const toolDefinitions = [
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'fetch_paid_data',
+      description:
+        'Fetch a resource from the configured paid API (x402 style). If it answers 402 Payment Required, the advertised price is paid through the policy engine (the tier rules apply) and the request is retried once. Use it for data that costs a small testnet fee.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Full URL of the resource; its origin must match the configured paid API.' },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 export interface ToolContext {
@@ -160,6 +177,8 @@ export interface ToolContext {
   audit: AuditLog;
   /** Optional: user-configured schedules, exposed read-only to the agent. */
   schedules?: Schedules;
+  /** Optional: the only origin fetch_paid_data may call (from X402_API_URL). */
+  x402ApiUrl?: string;
 }
 
 /** Runs a tool call. Every argument from the model is validated; nothing is trusted. */
@@ -226,6 +245,16 @@ async function dispatchTool(name: string, args: Record<string, unknown>, ctx: To
     }
     case 'list_schedules':
       return ctx.schedules ?? { version: 1, rules: [] };
+    case 'fetch_paid_data': {
+      if (!ctx.x402ApiUrl) return { error: 'The paid API is not configured (set X402_API_URL).' };
+      const url = String(args.url ?? '');
+      return fetchPaidData(url, new URL(ctx.x402ApiUrl).origin, {
+        fetchFn: fetch,
+        execute: (intent) => ctx.executor.execute(intent),
+        network: chain.name,
+        symbol: ctx.policy.native.symbol,
+      });
+    }
     default:
       return { error: `Unknown tool ${name}` };
   }
