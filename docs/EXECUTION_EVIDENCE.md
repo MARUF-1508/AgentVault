@@ -1,6 +1,6 @@
 # Execution Evidence
 
-Generated 2026-10-16T19:11:15.051Z from `data/audit.jsonl`.
+Generated 2026-10-17T20:33:36.054Z from `data/audit.jsonl`.
 Audit chain integrity: ✅ intact
 ## AgentVault (on-chain enforcement)
 
@@ -12,7 +12,7 @@ Over-cap agent call (0.001 ETH): [0x22da3e42…](https://sepolia.basescan.org/tx
 Non-allowlisted agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd71e8143568d1d418149b290ca0ddab5fc4015cebdfe3d5ef608ee47fb24e568) ❌ reverted on-chain
 
 
-## On-chain transactions (12)
+## On-chain transactions (16)
 
 | Time (UTC) | Action | Amount | Tier | Result | Tx hash |
 |---|---|---|---|---|---|
@@ -28,6 +28,10 @@ Non-allowlisted agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd7
 | 2026-10-16T18:58:10.880Z | erc20_approve | 0.5 USDC | T1_AUTO | ✅ block 48204402 | [0x340871f2…](https://sepolia.basescan.org/tx/0x340871f2aff3a80bcb4c1fc789e853a2ccf838d053535b4bfe7641759da9ad13) |
 | 2026-10-16T18:58:18.764Z | swap | 0.5 USDC | T1_AUTO | ✅ block 48204406 | [0xbf76a7bb…](https://sepolia.basescan.org/tx/0xbf76a7bbe12be71be821618bc35b55315a9fac09a658ac1589790015405461f9) |
 | 2026-10-16T19:06:06.512Z | native_transfer | 0.0001 ETH | T1_AUTO | ✅ block 48204640 | [0xd7bc3fab…](https://sepolia.basescan.org/tx/0xd7bc3fab2f93caa1b31645b0388d9910a3dc8607f769529b9b43dfc83853d788) |
+| 2026-10-17T16:53:26.599Z | native_transfer | 0.0002 ETH | T1_AUTO | ✅ block 48243860 | [0x68563461…](https://sepolia.basescan.org/tx/0x6856346118bbe4bb4ca8487e3d3a1f157d3a0a742234b5a6d7ffc0f3462f6113) |
+| 2026-10-17T19:51:07.596Z | native_transfer | 0.0002 ETH | T1_AUTO | ✅ block 48249190 | [0xc24761c4…](https://sepolia.basescan.org/tx/0xc24761c479c3455352fda3e6778d6bf6cc863b8512ae750f53ab79fef1f6dad0) |
+| 2026-10-17T20:32:35.295Z | native_transfer | 0.0001 ETH | T1_AUTO | ✅ block 48250434 | [0x9ba0ae07…](https://sepolia.basescan.org/tx/0x9ba0ae077d760706b6938da968593d610376312654198a29e134de93d573dc73) |
+| 2026-10-17T20:32:52.909Z | native_transfer | 0.0001 ETH | T2_CONFIRM | ✅ block 48250443 | [0x32cc4187…](https://sepolia.basescan.org/tx/0x32cc41871fd959c4dc7f13d69fae0c55ba26496367382b18478145216536583b) |
 
 ## Blocked by policy (5)
 
