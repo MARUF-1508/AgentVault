@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "dotenv": "^18.0.7",
@@ -27,6 +28,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^5.0.4",
     "tsx": "^4.23.15",

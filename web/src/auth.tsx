@@ -8,6 +8,8 @@ interface AuthValue {
   can: (p: Permission) => boolean;
   login: (username: string, password: string, code?: string) => Promise<Me>;
   logout: () => Promise<void>;
+  /** Re-reads the session from the server (used right after first-run setup). */
+  refresh: () => Promise<Me | null>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -41,9 +43,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMe(null);
   }, []);
 
+  const refresh = useCallback(async () => {
+    const next = await getMe().catch(() => null);
+    setMe(next);
+    return next;
+  }, []);
+
   const can = useCallback((p: Permission) => Boolean(me?.permissions.includes(p)), [me]);
 
-  return <AuthContext.Provider value={{ me, loading, can, login, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ me, loading, can, login, logout, refresh }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthValue {

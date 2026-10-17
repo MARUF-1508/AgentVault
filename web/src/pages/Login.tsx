@@ -12,7 +12,7 @@ const USERNAME_RE = /^[a-z0-9_-]{2,32}$/;
 
 export default function Login() {
   usePageTitle('Sign in');
-  const { me, login } = useAuth();
+  const { me, login, refresh } = useAuth();
   const { resolved, toggle } = useTheme();
   const navigate = useNavigate();
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/';
@@ -56,7 +56,12 @@ export default function Login() {
       if (password.length < 10) return fail('Password must be at least 10 characters.');
       if (password !== confirm) return fail('Passwords do not match.');
       setup(username.trim(), password)
-        .then((u) => done(u.user))
+        // The setup response carries the session cookie; pull it into the
+        // provider before navigating, or RequireAuth bounces us back here.
+        .then(async (u) => {
+          await refresh();
+          done(u.user);
+        })
         .catch((err: Error) => fail(err.message))
         .finally(() => setBusy(false));
     } else {
