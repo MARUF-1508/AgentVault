@@ -18,7 +18,34 @@ export interface Portfolio {
 export interface Policy {
   native: { symbol: string; autoMaxPerTx: string; hardMaxPerTx: string; dailyBudget: string };
   tokens: Record<string, { autoMaxPerTx: string; hardMaxPerTx: string; dailyBudget: string }>;
-  recipients: { allowlist: Record<string, string> };
+  recipients: { allowlist: Record<string, string>; denylist: string[] };
+  rateLimit: { maxTxPerHour: number };
+}
+
+export interface Status {
+  address: string | null;
+  chain: string;
+  chainId: number;
+  explorer: string | null;
+  paused: boolean;
+  vault: string | null;
+  llm: boolean;
+  model: string | null;
+}
+
+export interface BudgetAsset {
+  asset: string;
+  spentToday: string;
+  dailyBudget: string;
+  autoMaxPerTx: string;
+  hardMaxPerTx: string;
+}
+
+export interface Budget {
+  paused: boolean;
+  txLastHour: number;
+  maxTxPerHour: number;
+  assets: BudgetAsset[];
 }
 
 export interface ActivityEntry {
@@ -28,22 +55,49 @@ export interface ActivityEntry {
   data: Record<string, unknown>;
 }
 
+export type Tier = 'T1_AUTO' | 'T2_CONFIRM' | 'T3_DENY';
+
+export type TransferIntent =
+  | { kind: 'native_transfer'; to: string; amount: string }
+  | { kind: 'erc20_transfer'; token: string; to: string; amount: string };
+
+export interface TransactResult {
+  status: string;
+  tier: Tier;
+  reasons: string[];
+  txHash?: string;
+  explorerUrl?: string;
+  error?: string;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...init });
-  const data = (await r.json()) as T & { error?: string };
-  if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+  const data = (await r.json()) as T & { error?: string; issues?: string[] };
+  if (!r.ok) throw new Error([data.error ?? `HTTP ${r.status}`, ...(data.issues ?? [])].join(': '));
   return data;
 }
 
-export const getPortfolio = () => api<Portfolio>('/api/portfolio');
-export const getPolicy = () => api<Policy>('/api/policy');
-export const getActivity = (limit = 20) => api<ActivityEntry[]>(`/api/activity?limit=${limit}`);
-export const getVerify = () => api<{ ok: boolean; brokenAt?: number; reason?: string }>('/api/verify');
-export const getPending = () => api<{ pending: string | null }>('/api/pending');
-export const decide = (approved: boolean) =>
-  api<{ decided: boolean }>('/api/decide', { method: 'POST', body: JSON.stringify({ approved }) });
+/** Read tools report failures as `{ error }` with HTTP 200 (e.g. an RPC outage); surface them as errors. */
+async function read<T>(path: string): Promise<T> {
+  const data = await api<T | { error: string }>(path);
+  if (data && typeof data === 'object' && !Array.isArray(data) && typeof (data as { error?: unknown }).error === 'string') {
+    throw new Error((data as { error: string }).error);
+  }
+  return data as T;
+}
+
+const post = <T>(path: string, body: unknown) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
+
+export const getStatus = () => read<Status>('/api/status');
+export const getPortfolio = () => read<Portfolio>('/api/portfolio');
+export const getPolicy = () => read<Policy>('/api/policy');
+export const getBudget = () => read<Budget>('/api/budget');
+export const getActivity = (limit = 30) => read<ActivityEntry[]>(`/api/activity?limit=${limit}`);
+export const getVerify = () => read<{ ok: boolean; brokenAt?: number; reason?: string }>('/api/verify');
+export const getPending = () => read<{ pending: string | null; expiresAt: number | null }>('/api/pending');
+export const decide = (approved: boolean) => post<{ decided: boolean }>('/api/decide', { approved });
+export const pause = () => post<{ paused: boolean }>('/api/pause', {});
+export const preview = (intent: TransferIntent) => post<{ tier: Tier; reasons: string[] }>('/api/preview', { intent });
+export const transact = (intent: TransferIntent) => post<TransactResult>('/api/transact', { intent });
 export const chat = (message: string, session?: string) =>
-  api<{ session: string; answer: string }>('/api/chat', {
-    method: 'POST',
-    body: JSON.stringify({ message, session }),
-  });
+  post<{ session: string; answer: string; events?: string[] }>('/api/chat', { message, session });
