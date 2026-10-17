@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './auth';
+import ErrorBoundary from './components/ErrorBoundary';
 import { WalletDataProvider } from './data';
 import { usePageTitle } from './format';
 import AppShell from './layout/AppShell';
@@ -56,24 +57,26 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <BrowserRouter>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route
-                element={
-                  <RequireAuth>
-                    <AppShell />
-                  </RequireAuth>
-                }
-              >
-                <Route index element={<Dashboard />} />
-                <Route path="agent" element={<Agent />} />
-                <Route path="transfer" element={<Transfer />} />
-                <Route path="activity" element={<Activity />} />
-                <Route path="security" element={<Security />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
+            <ErrorBoundary>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route
+                  element={
+                    <RequireAuth>
+                      <AppShell />
+                    </RequireAuth>
+                  }
+                >
+                  <Route index element={<Dashboard />} />
+                  <Route path="agent" element={<Agent />} />
+                  <Route path="transfer" element={<Transfer />} />
+                  <Route path="activity" element={<Activity />} />
+                  <Route path="security" element={<Security />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="*" element={<NotFound />} />
+                </Route>
+              </Routes>
+            </ErrorBoundary>
           </BrowserRouter>
           <ThemedToaster />
         </AuthProvider>

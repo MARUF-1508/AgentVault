@@ -73,6 +73,29 @@ export default function ApprovalModal() {
   // A fresh pending request starts with an empty confirmation field.
   useEffect(() => setTyped(''), [pending]);
 
+  // Desktop notification when a new approval lands, so the operator can be on
+  // another tab. Purely informational: the decision itself always needs a click.
+  const notified = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pending || !mayApprove || notified.current === pending) return;
+    notified.current = pending;
+    if (typeof Notification === 'undefined') return;
+    const f0 = parse(pending);
+    const show = () => {
+      try {
+        new Notification('Agent Vault: approval needed', {
+          body: [f0.Amount, f0.Action ? `(${f0.Action.replace(/_/g, ' ')})` : '', f0.Target].filter(Boolean).join(' '),
+          tag: 'av-approval',
+          icon: '/favicon.png',
+        });
+      } catch {
+        // Some browsers only allow notifications in a service-worker context.
+      }
+    };
+    if (Notification.permission === 'granted') show();
+    else if (Notification.permission === 'default') void Notification.requestPermission().then((p) => p === 'granted' && show());
+  }, [pending, mayApprove]);
+
   // Focus the safe choice first, so a stray Enter rejects.
   useEffect(() => {
     if (pending) rejectRef.current?.focus();

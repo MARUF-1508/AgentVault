@@ -7,6 +7,7 @@ import { pause } from '../api';
 import { useAuth } from '../auth';
 import ApprovalModal from '../components/ApprovalModal';
 import CommandPalette from '../components/CommandPalette';
+import OfflineBanner from '../components/OfflineBanner';
 import { useWallet } from '../data';
 import { shortAddr } from '../format';
 import { NAV } from '../nav';
@@ -231,6 +232,8 @@ export default function AppShell() {
             <UserMenu />
           </div>
         </header>
+
+        <OfflineBanner />
 
         {status?.paused && (
           <p className="banner bad">

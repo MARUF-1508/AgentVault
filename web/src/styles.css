@@ -77,6 +77,8 @@ p { margin: 0.4rem 0; }
 .topbar-actions { margin-left: auto; }
 .banner { margin: 0; padding: 0.55rem 24px; font-size: 0.875rem; }
 .banner.bad { background: var(--bad-bg); color: var(--bad); border-bottom: 1px solid var(--bad); }
+.banner.warn { display: flex; align-items: center; gap: 0.4rem; background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid var(--warn); }
+.error-detail { white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border: 1px solid var(--border); padding: 0.75rem; border-radius: 8px; }
 
 .brand { display: flex; gap: 0.65rem; align-items: center; padding: 0 0.4rem; }
 .brand img { border-radius: 9px; box-shadow: 0 0 0 1px var(--border), 0 4px 14px var(--accent-soft); }
