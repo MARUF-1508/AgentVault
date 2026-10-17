@@ -8,10 +8,10 @@ import type { AuditLog } from '../audit/log.js';
  * Pausing is offered to the CLI and the local web UI (it can only make the
  * wallet safer); resuming is CLI-only. The LLM gets neither.
  */
-export function pauseWallet(pauseFile: string, audit: AuditLog, by: 'cli' | 'web'): void {
+export function pauseWallet(pauseFile: string, audit: AuditLog, by: 'cli' | 'web', user?: string): void {
   mkdirSync(dirname(pauseFile), { recursive: true });
   writeFileSync(pauseFile, new Date().toISOString());
-  audit.append('kill_switch', { paused: true, by });
+  audit.append('kill_switch', user ? { paused: true, by, user } : { paused: true, by });
 }
 
 export function resumeWallet(pauseFile: string, audit: AuditLog): void {

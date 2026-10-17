@@ -6,6 +6,8 @@ import { erc20Abi, parseUnits } from 'viem';
 import { chatTurn } from './agent/agent.js';
 import { runTool, type ToolContext } from './agent/tools.js';
 import { CliApprover, WebApprover } from './approval/approver.js';
+import { ROLES, type Role } from './auth/rbac.js';
+import { UserStore } from './auth/users.js';
 import { AuditLog } from './audit/log.js';
 import { makeClients } from './chain/client.js';
 import { loadEnv, loadPolicy } from './config.js';
@@ -29,7 +31,9 @@ const USAGE = `Agent Wallet
   npm run cli -- schedule [list|run]               scheduled / conditional rules
   npm run cli -- pause | resume                    kill switch
   npm run cli -- audit [verify|tail]               audit log
-  npm run cli -- serve [--port N]                  web UI (loopback only, no auth: local demo)
+  npm run cli -- serve [--port N]                  web UI (loopback only, sign-in required)
+  npm run cli -- user add <name> <owner|operator|viewer>   create a web-UI account (prints its password)
+  npm run cli -- user list | remove <name>         manage web-UI accounts
   npm run agent                                    chat with the AI agent
 `;
 
@@ -50,6 +54,7 @@ async function main() {
     resumeWallet(env.PAUSE_FILE, audit);
     return void console.log('Wallet resumed.');
   }
+  if (cmd === 'user' || cmd === 'users') return userCommand(new UserStore(env.USERS_FILE), rest);
   if (cmd === 'audit') {
     if (rest[0] === 'verify') {
       const v = audit.verify();
@@ -66,9 +71,16 @@ async function main() {
     const approver = new WebApprover();
     const webExecutor = new Executor(clients, policy, audit, approver, env.PAUSE_FILE, vault);
     const webCtx: ToolContext = { clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) };
-    const server = createServer({ env, ctx: webCtx, approver, vault });
+    const users = new UserStore(env.USERS_FILE);
+    if (users.list().length === 0) {
+      // First run: create one owner so the UI is never open without a sign-in.
+      const password = users.add('owner', 'owner');
+      console.log(`No web accounts yet. Created "owner" with password: ${password}`);
+      console.log('It is shown once. Add more with `npm run cli -- user add <name> <role>`.');
+    }
+    const server = createServer({ env, ctx: webCtx, approver, vault, users });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
-    return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (loopback only, no auth: local demo, do not expose).`);
+    return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (loopback only, sign-in required; do not expose).`);
   }
   const executor = new Executor(clients, policy, audit, new CliApprover(), env.PAUSE_FILE, vault);
   const schedules = readSchedules(env.SCHEDULES_FILE);
@@ -110,6 +122,19 @@ async function main() {
       console.log(USAGE);
       process.exitCode = 1;
   }
+}
+
+/** user add <name> <role> | user list | user remove <name>. CLI-only by design. */
+function userCommand(users: UserStore, args: string[]): void {
+  const [sub, name, role] = args;
+  if (sub === 'add' && name && ROLES.includes(role as Role)) {
+    const password = users.add(name, role as Role);
+    return void console.log(`Saved ${name} (${role}). Password, shown once: ${password}`);
+  }
+  if (sub === 'remove' && name) return void console.log(users.remove(name) ? `Removed ${name}.` : `No user ${name}.`);
+  if (sub === 'list' || !sub) return print(users.list());
+  console.error(`Usage: user add <name> <${ROLES.join('|')}> | user list | user remove <name>`);
+  process.exitCode = 1;
 }
 
 /** Reads schedules.json if present; a missing file just means no rules. */

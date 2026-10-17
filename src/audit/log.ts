@@ -11,7 +11,8 @@ export type AuditType =
   | 'tx_confirmed'  // mined, with receipt status
   | 'tx_failed'
   | 'schedule'      // a scheduled/conditional rule fired
-  | 'kill_switch';
+  | 'kill_switch'
+  | 'access';       // web-UI sign-in, approval or pause by a named user
 
 export interface AuditEntry {
   seq: number;
