@@ -14,6 +14,7 @@ import type { Env } from '../config.js';
 import { pauseWallet } from '../policy/killswitch.js';
 import { spendStateFrom } from '../policy/state.js';
 import { IntentSchema } from '../policy/types.js';
+import { dailyStats } from '../report/stats.js';
 
 export interface WebServerOptions {
   env: Env;
@@ -36,6 +37,7 @@ const ROUTES: Record<string, Permission> = {
   'GET /api/portfolio': 'read',
   'GET /api/policy': 'read',
   'GET /api/activity': 'read',
+  'GET /api/stats': 'read',
   'GET /api/verify': 'read',
   'GET /api/pending': 'read',
   'GET /api/users': 'admin',
@@ -279,6 +281,9 @@ export function createServer(opts: WebServerOptions): Server {
       if (req.method === 'GET' && path === '/api/activity') {
         const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 20), 1), 50);
         return send(res, 200, await runTool('get_recent_activity', JSON.stringify({ limit }), ctx));
+      }
+      if (req.method === 'GET' && path === '/api/stats') {
+        return send(res, 200, dailyStats(ctx.audit.read()));
       }
       if (req.method === 'GET' && path === '/api/verify') {
         return send(res, 200, ctx.audit.verify());

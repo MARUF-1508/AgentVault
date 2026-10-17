@@ -6,6 +6,7 @@ import type { Executor } from '../executor/executor.js';
 import { tokenInfo } from '../policy/engine.js';
 import { ActionIntentSchema, SwapIntentSchema, type Policy } from '../policy/types.js';
 import { getPortfolio } from '../portfolio/portfolio.js';
+import { resolveRecipient } from './resolve.js';
 import type { Schedules } from '../schedule/rules.js';
 
 const actionParams = {
@@ -88,6 +89,20 @@ export const toolDefinitions = [
           slippageBps: { type: 'number', description: 'Optional; defaults to the policy auto slippage cap.' },
         },
         required: ['tokenIn', 'tokenOut', 'amountIn'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'resolve_recipient',
+      description:
+        'T0 read-only. Look up a recipient name (or address) in the saved allowlist and denylist before any transfer. If the name is not found, do NOT guess an address — ask the user for the 0x address.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string', description: 'A name like "alice", or a 0x address' } },
+        required: ['name'],
         additionalProperties: false,
       },
     },
@@ -191,6 +206,8 @@ async function dispatchTool(name: string, args: Record<string, unknown>, ctx: To
       return ctx.policy;
     case 'get_swap_quote':
       return swapQuote(args, ctx);
+    case 'resolve_recipient':
+      return resolveRecipient(ctx.policy, String(args.name ?? ''));
     case 'preview_transaction':
     case 'execute_transaction': {
       const parsed = ActionIntentSchema.safeParse(args);
