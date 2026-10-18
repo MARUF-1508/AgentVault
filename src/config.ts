@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { PolicySchema, type Policy } from './policy/types.js';
 
+/** A 0x-prefixed 20-byte address, for env vars that carry one. */
+const EnvAddress = z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed address');
+/** A 0x-prefixed 32-byte transaction hash, for the evidence env vars. */
+const EnvTxHash = z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'must be a 0x-prefixed tx hash');
+
 const EnvSchema = z.object({
   CHAIN: z.enum(['base-sepolia', 'sepolia']).default('base-sepolia'),
   RPC_URL: z.string().url().optional(),
@@ -28,31 +33,24 @@ const EnvSchema = z.object({
   ALLOW_MAINNET: z.string().default('false'),
   // Executor vault-routing mode (VAULT=true sends native transfers via agentSend).
   VAULT: z.string().default('false'),
+  // Route ERC-20 transfers through AgentVaultV2.agentSendToken as well, so the
+  // vault's token cap applies on-chain. Requires VAULT=true and a V2 vault that
+  // the owner has funded with the token (`setAllowedToken`).
+  VAULT_TOKENS: z.string().default('false'),
   // Deployed AgentVault and its externally-observed txs, for the evidence doc.
-  VAULT_ADDRESS: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{40}$/, 'VAULT_ADDRESS must be a 0x-prefixed address')
-    .optional(),
-  VAULT_DEPLOY_TX: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_DEPLOY_TX must be a 0x-prefixed tx hash')
-    .optional(),
-  VAULT_SET_RECIPIENT_TX: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_SET_RECIPIENT_TX must be a 0x-prefixed tx hash')
-    .optional(),
-  VAULT_SEND_TX: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_SEND_TX must be a 0x-prefixed tx hash')
-    .optional(),
-  VAULT_REVERT_TX: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_REVERT_TX must be a 0x-prefixed tx hash')
-    .optional(),
-  VAULT_DENY_TX: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{64}$/, 'VAULT_DENY_TX must be a 0x-prefixed tx hash')
-    .optional(),
+  VAULT_ADDRESS: EnvAddress.optional(),
+  VAULT_DEPLOY_TX: EnvTxHash.optional(),
+  VAULT_SET_RECIPIENT_TX: EnvTxHash.optional(),
+  VAULT_SEND_TX: EnvTxHash.optional(),
+  VAULT_REVERT_TX: EnvTxHash.optional(),
+  VAULT_DENY_TX: EnvTxHash.optional(),
+  // Optional second (v2) vault: session keys + ERC-20. Rendered as its own
+  // section in the evidence doc so the v1 hashes above stay as they were.
+  VAULT2_ADDRESS: EnvAddress.optional(),
+  VAULT2_DEPLOY_TX: EnvTxHash.optional(),
+  VAULT2_GRANT_SESSION_TX: EnvTxHash.optional(),
+  VAULT2_SEND_TX: EnvTxHash.optional(),
+  VAULT2_REVERT_TX: EnvTxHash.optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
