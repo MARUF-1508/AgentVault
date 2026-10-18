@@ -311,6 +311,17 @@ th.mine { color: var(--accent-2); }
 .policy-list li:hover { background: var(--surface-2); }
 .policy-list.denied li { grid-template-columns: minmax(0, 1fr) auto; }
 .policy-list .addr { overflow-wrap: anywhere; }
+/* Phone width: the label | address | action columns starve the 42-char address
+   into 4-char slivers. Stack: label and action on the first line, address full
+   width underneath. */
+@media (max-width: 600px) {
+  .policy-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .policy-list li .addr { grid-column: 1 / -1; grid-row: 2; }
+  /* Denied rows have no label: address first, compact action underneath. */
+  .policy-list.denied li { grid-template-columns: 1fr; }
+  .policy-list.denied li .addr { grid-row: 1; }
+  .policy-list.denied li > button { justify-self: start; }
+}
 .fresh-pass { border: 1px dashed var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 0.7rem 0.9rem; margin-top: 0.6rem; }
 .fresh-pass p { margin: 0.2rem 0; }
 .fresh-pass code { font-size: 0.95rem; }

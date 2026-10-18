@@ -79,6 +79,20 @@ test('recipient lists give the label its own column and never overlap the button
   const scrollW = await page.evaluate(() => document.scrollingElement!.scrollWidth);
   const innerW = await page.evaluate(() => window.innerWidth);
   expect(scrollW).toBeLessThanOrEqual(innerW + 1);
+
+  // Regression guard: at phone width the shared label column starved the
+  // address into a ~4-character sliver. It must get a full-width own row.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await card.scrollIntoViewIfNeeded();
+  const addr = await row.locator('.addr').boundingBox();
+  expect(addr, 'the first allowlist row renders an address').not.toBeNull();
+  expect(addr!.width).toBeGreaterThanOrEqual(180);
+  const deniedRows = card.locator('.policy-list.denied li .addr');
+  if (await deniedRows.count()) {
+    const deniedAddr = await deniedRows.first().boundingBox();
+    expect(deniedAddr, 'the denylist row renders an address').not.toBeNull();
+    expect(deniedAddr!.width).toBeGreaterThanOrEqual(180);
+  }
 });
 
 test('the receive dialog closes with Escape', async ({ page }) => {
