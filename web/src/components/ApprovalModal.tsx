@@ -1,10 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ShieldAlert } from 'lucide-react';
+import { Minimize2, ShieldAlert } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
-import { decide, getPending } from '../api';
+import { useApproval } from '../approval';
 import { useAuth } from '../auth';
-import { useWallet } from '../data';
 import { splitReasons, TierBadge } from '../format';
 
 /** Matches the WebApprover default in src/approval/approver.ts. */
@@ -42,78 +40,28 @@ function AddressBlocks({ value }: { value: string }) {
 }
 
 export default function ApprovalModal() {
+  const { summary, expiresAt, open, hide, answer, busy } = useApproval();
   const { can, me } = useAuth();
-  const { refresh } = useWallet();
-  const [pending, setPending] = useState<string | null>(null);
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [busy, setBusy] = useState(false);
   const [typed, setTyped] = useState('');
   const rejectRef = useRef<HTMLButtonElement>(null);
   const mayApprove = can('approve');
 
-  useEffect(() => {
-    if (!me) return;
-    const poll = () =>
-      getPending()
-        .then((r) => {
-          setPending(r.pending);
-          setExpiresAt(r.expiresAt);
-        })
-        .catch(() => {});
-    poll();
-    const t = setInterval(poll, 1500);
-    const clock = setInterval(() => setNow(Date.now()), 500);
-    return () => {
-      clearInterval(t);
-      clearInterval(clock);
-    };
-  }, [me]);
-
   // A fresh pending request starts with an empty confirmation field.
-  useEffect(() => setTyped(''), [pending]);
+  useEffect(() => setTyped(''), [summary]);
 
-  // Desktop notification when a new approval lands, so the operator can be on
-  // another tab. Purely informational: the decision itself always needs a click.
-  const notified = useRef<string | null>(null);
   useEffect(() => {
-    if (!pending || !mayApprove || notified.current === pending) return;
-    notified.current = pending;
-    if (typeof Notification === 'undefined') return;
-    const f0 = parse(pending);
-    const show = () => {
-      try {
-        new Notification('Agent Vault: approval needed', {
-          body: [f0.Amount, f0.Action ? `(${f0.Action.replace(/_/g, ' ')})` : '', f0.Target].filter(Boolean).join(' '),
-          tag: 'av-approval',
-          icon: '/favicon.png',
-        });
-      } catch {
-        // Some browsers only allow notifications in a service-worker context.
-      }
-    };
-    if (Notification.permission === 'granted') show();
-    else if (Notification.permission === 'default') void Notification.requestPermission().then((p) => p === 'granted' && show());
-  }, [pending, mayApprove]);
+    if (!summary) return;
+    const clock = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(clock);
+  }, [summary]);
 
   // Focus the safe choice first, so a stray Enter rejects.
   useEffect(() => {
-    if (pending) rejectRef.current?.focus();
-  }, [pending]);
+    if (open && summary) rejectRef.current?.focus();
+  }, [open, summary]);
 
-  const answer = (approved: boolean) => {
-    setBusy(true);
-    decide(approved)
-      .then(() => {
-        setPending(null);
-        toast[approved ? 'success' : 'message'](approved ? 'Approved. Signing and broadcasting…' : 'Rejected. Nothing was signed.');
-        refresh();
-      })
-      .catch((e: Error) => toast.error(e.message))
-      .finally(() => setBusy(false));
-  };
-
-  const f = pending ? parse(pending) : {};
+  const f = summary ? parse(summary) : {};
   const left = expiresAt ? Math.max(0, expiresAt - now) : 0;
 
   // First-time recipients are the risky case, so approving one asks the human to
@@ -125,7 +73,7 @@ export default function ApprovalModal() {
 
   return (
     <AnimatePresence>
-      {pending && (
+      {summary && open && (
         <motion.div
           // Owners get a blocking dialog; others get a corner card that does not block the page.
           className={mayApprove ? 'overlay' : 'floating'}
@@ -148,7 +96,14 @@ export default function ApprovalModal() {
               <h2 id="approval-title" className="row">
                 <ShieldAlert size={20} aria-hidden /> {mayApprove ? 'Your approval is needed' : 'Waiting for an owner'}
               </h2>
-              <TierBadge tier={f.Tier ?? 'T2_CONFIRM'} />
+              <div className="row">
+                <TierBadge tier={f.Tier ?? 'T2_CONFIRM'} />
+                {mayApprove && (
+                  <button className="ghost icon" onClick={hide} title="Minimise. The pill in the top bar brings it back." aria-label="Minimise this approval">
+                    <Minimize2 size={16} />
+                  </button>
+                )}
+              </div>
             </div>
             <p className="muted">The policy engine allows this only with a human's yes. Check the recipient carefully.</p>
             <dl className="fields">
@@ -208,7 +163,7 @@ export default function ApprovalModal() {
                 {isNewRecipient && (
                   <div className="confirm-address">
                     <label>
-                      First time sending to this address. Type its last 4 characters ({last4.length}/4) to unlock approval.
+                      First time sending to this address. Type its last 4 characters ({typed.trim().length}/4) to unlock approval.
                       <input
                         value={typed}
                         onChange={(e) => setTyped(e.target.value)}

@@ -62,14 +62,53 @@ Edge work best), and replies can be read aloud with the browser's speech
 synthesis. No audio reaches the wallet server. Voice only types into the chat:
 approving a T2 always needs an owner's click.
 
+## Recipients and the policy
+
+Settings → Recipients (owner only) edits the two lists the policy engine reads on
+every decision: known recipients (allowlist) and denied addresses (denylist).
+The same edits work from the terminal:
+
+```
+npm run cli -- recipient list
+npm run cli -- recipient add <label> <address>
+npm run cli -- recipient remove <label>
+npm run cli -- deny add <address>
+npm run cli -- deny remove <address>
+```
+
+Both paths write `config/policy.json` atomically and log the change with the
+owner's name. Two of the four edits *lower* the tier an address gets — adding a
+known recipient and un-denying one — and those ask for the password again, in
+the UI and over HTTP (a local shell is already authorised). An address that
+imitates one already on the allowlist is refused. The agent has **no tool** that
+can touch either list; see `test/policy-edit.test.ts`, which asserts that.
+
+If the UI server is already running it picks the change up immediately; after a
+CLI edit, restart it.
+
 ## How approvals work
 
-T2 transactions park in a shared `WebApprover` queue on the server. The
-approval dialog polls `GET /api/pending` and an owner answers with
-`POST /api/decide`. A rejected approval resolves the executor with
-`rejected_by_human` and nothing is signed (see `test/approver.test.ts`). A
-request nobody answers within two minutes is rejected the same way. Each
-decision is logged with the owner's name.
+T2 transactions park in a shared `WebApprover` queue on the server. One
+poller (`src/approval.tsx`) watches `GET /api/pending` and shares it with
+the dialog and the top-bar pill; an owner answers with `POST /api/decide`. A
+rejected approval resolves the executor with `rejected_by_human` and
+nothing is signed (see `test/approver.test.ts`). A request nobody answers
+within two minutes is rejected the same way. Each decision is logged with
+the owner's name.
+
+A request opens the dialog by itself, wherever you are, whether it came from
+the Agent page or the Transfer page. The owner can minimise it to read on;
+the pulsing **Approval needed** pill in the top bar brings it back. While the
+Agent page waits on a T2 its "working" bubble says so, so it is clear that
+the turn is parked on a human rather than stuck.
+
+Typing an address that is **not** a known recipient into the Agent page raises a
+shortcut instead of calling the model: the chat offers the Transfer page,
+prefilled with the address and amount, so you can read the tier and the reasons
+before spending an LLM round trip. "Continue in chat" does the normal thing and
+the approval dialog opens as above. This is an interaction affordance, not a
+security control — both routes end at the same policy engine and the same T2
+approval. See `test/unlisted.test.ts`.
 
 ## Security notes
 
