@@ -112,6 +112,25 @@ describe('policy engine: approvals', () => {
     const d = evaluate({ kind: 'erc20_approve', token: 'USDC', spender: DEX, amount: '1' }, policy, fresh(), CHAIN);
     expect(d.tier).toBe('T1_AUTO');
   });
+
+  it('allows revoking an allowance (amount 0) even to a non-allowlisted spender', () => {
+    const d = evaluate({ kind: 'erc20_approve', token: 'USDC', spender: STRANGER, amount: '0' }, policy, fresh(), CHAIN);
+    expect(d.tier).toBe('T1_AUTO');
+    expect(d.amountBase).toBe(0n);
+    expect(d.reasons.join(' ')).toMatch(/[Rr]evoking/);
+  });
+
+  it('still refuses a zero-amount transfer (only approvals may be 0)', () => {
+    const d = evaluate({ kind: 'erc20_transfer', token: 'USDC', to: FRIEND, amount: '0' }, policy, fresh(), CHAIN);
+    expect(d.tier).toBe('T3_DENY');
+  });
+
+  it('refuses a revoke while paused and for a token that is not in policy', () => {
+    const paused = evaluate({ kind: 'erc20_approve', token: 'USDC', spender: DEX, amount: '0' }, policy, { ...fresh(), paused: true }, CHAIN);
+    expect(paused.tier).toBe('T3_DENY');
+    const unknown = evaluate({ kind: 'erc20_approve', token: 'NOPE', spender: DEX, amount: '0' }, policy, fresh(), CHAIN);
+    expect(unknown.tier).toBe('T3_DENY');
+  });
 });
 
 describe('policy engine: swaps', () => {
