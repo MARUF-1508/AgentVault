@@ -25,4 +25,15 @@ describe('system prompt', () => {
     expect(SYSTEM_PROMPT).toMatch(/resolve_recipient/);
     expect(SYSTEM_PROMPT).toMatch(/ask the user for the 0x address/i);
   });
+
+  it('tells the model to still submit a T2 instead of handing the work back to the user', () => {
+    // Regression: a weak model read "T2 pauses for the human" as "not my job",
+    // answered in prose and never called the execute tool, so no approval card
+    // was ever raised and the transaction silently did not happen.
+    expect(SYSTEM_PROMPT).toMatch(/A T2 is never a reason to stop/i);
+    expect(SYSTEM_PROMPT).toMatch(/always make the call/i);
+    expect(SYSTEM_PROMPT).toMatch(/you still submit it/i);
+    // Channel-neutral: chatTurn serves the CLI and the web UI alike.
+    expect(SYSTEM_PROMPT).not.toMatch(/in the terminal/i);
+  });
 });

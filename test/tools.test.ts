@@ -81,3 +81,52 @@ describe('tool robustness', () => {
     await expect(runTool('get_wallet_info', '{}', failing)).resolves.toMatchObject({ error: expect.stringMatching(/rpc down/) });
   });
 });
+
+describe('what_if tool', () => {
+  let seen: { intent: unknown; hypothesis: Record<string, unknown> } | undefined;
+  const whatIfCtx = () =>
+    ({
+      clients: { publicClient: {}, account: undefined, chain: { id: 84532, name: 'Base Sepolia' } },
+      executor: {
+        whatIf: async (intent: unknown, hypothesis: Record<string, unknown>) => {
+          seen = { intent, hypothesis };
+          return {
+            baseline: { tier: 'T2_CONFIRM', reasons: ['0x11… is a new recipient (not on the allowlist).'] },
+            hypothetical: { tier: 'T1_AUTO', reasons: ['Known recipient, within auto limit.'] },
+            morePermissive: true,
+            summary: 'T2_CONFIRM → T1_AUTO: Known recipient, within auto limit.',
+          };
+        },
+        execute: () => {
+          throw new Error('what_if must never execute');
+        },
+      },
+    }) as unknown as ToolContext;
+
+  it('returns the today/hypothesis comparison and never executes', async () => {
+    const r = (await runTool(
+      'what_if',
+      JSON.stringify({ kind: 'native_transfer', to: '0x1111111111111111111111111111111111111111', amount: '0.0005', allowRecipient: true }),
+      whatIfCtx(),
+    )) as Record<string, { tier: string }> & { morePermissive: boolean; summary: string };
+    expect(r.today!.tier).toBe('T2_CONFIRM');
+    expect(r.underHypothesis!.tier).toBe('T1_AUTO');
+    expect(r.morePermissive).toBe(true);
+    expect(r.summary).toContain('→');
+    expect(seen!.hypothesis.allowRecipients).toEqual(['0x1111111111111111111111111111111111111111']);
+  });
+
+  it('passes limit overrides through to the simulator', async () => {
+    await runTool(
+      'what_if',
+      JSON.stringify({ kind: 'native_transfer', to: '0x1111111111111111111111111111111111111111', amount: '0.005', autoMaxPerTx: '0.01' }),
+      whatIfCtx(),
+    );
+    expect(seen!.hypothesis.limits).toEqual({ autoMaxPerTx: '0.01' });
+  });
+
+  it('rejects a malformed intent before reaching the executor', async () => {
+    const r = await runTool('what_if', JSON.stringify({ kind: 'native_transfer', to: '0x123', amount: '1' }), whatIfCtx());
+    expect(r).toMatchObject({ error: 'Invalid transaction' });
+  });
+});

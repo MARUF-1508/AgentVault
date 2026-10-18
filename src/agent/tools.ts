@@ -17,7 +17,7 @@ const actionParams = {
     to: { type: 'string', description: 'Recipient address (transfers only)' },
     spender: { type: 'string', description: 'Spender contract address (approve only)' },
     token: { type: 'string', description: 'Token symbol from the policy, e.g. USDC (erc20 only)' },
-    amount: { type: 'string', description: 'Human-readable decimal amount, e.g. "0.0001". "unlimited" only for approve.' },
+    amount: { type: 'string', description: 'Human-readable decimal amount, e.g. "0.0001". "unlimited" only for approve. For approve, amount "0" revokes a stale allowance.' },
   },
   required: ['kind'],
   additionalProperties: false,
@@ -168,6 +168,30 @@ export const toolDefinitions = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'what_if',
+      description:
+        'T0 read-only. Answers "what would happen if ...?": returns the policy verdict for a transfer as things stand today beside the verdict under a hypothesis (the recipient were already allowlisted, the limits were different, the wallet were paused). Nothing is sent and nothing changes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['native_transfer', 'erc20_transfer'] },
+          to: { type: 'string', description: 'Recipient address' },
+          amount: { type: 'string', description: 'Human-readable decimal amount, e.g. "0.0005"' },
+          token: { type: 'string', description: 'Token symbol from the policy (erc20 only)' },
+          allowRecipient: { type: 'boolean', description: 'Assume this recipient is already allowlisted' },
+          autoMaxPerTx: { type: 'string', description: 'Assume this auto limit for the asset' },
+          hardMaxPerTx: { type: 'string', description: 'Assume this hard cap for the asset' },
+          dailyBudget: { type: 'string', description: 'Assume this daily budget for the asset' },
+          paused: { type: 'boolean', description: 'Assume the kill switch is on' },
+        },
+        required: ['kind', 'to', 'amount'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 export interface ToolContext {
@@ -239,6 +263,30 @@ async function dispatchTool(name: string, args: Record<string, unknown>, ctx: To
     }
     case 'execute_swap':
       return executeSwap(args, ctx);
+    case 'what_if': {
+      const intent =
+        args.kind === 'erc20_transfer'
+          ? { kind: 'erc20_transfer' as const, token: args.token, to: args.to, amount: args.amount }
+          : { kind: 'native_transfer' as const, to: args.to, amount: args.amount };
+      const parsed = ActionIntentSchema.safeParse(intent);
+      if (!parsed.success) return { error: 'Invalid transaction', issues: parsed.error.issues.map((i) => i.message) };
+      const recipient = parsed.data.kind === 'erc20_approve' ? parsed.data.spender : parsed.data.to;
+      const limits: { autoMaxPerTx?: string; hardMaxPerTx?: string; dailyBudget?: string } = {};
+      for (const key of ['autoMaxPerTx', 'hardMaxPerTx', 'dailyBudget'] as const) {
+        if (typeof args[key] === 'string') limits[key] = args[key];
+      }
+      const r = await ctx.executor.whatIf(parsed.data, {
+        ...(args.allowRecipient === true ? { allowRecipients: [recipient] } : {}),
+        ...(args.paused === true ? { paused: true } : {}),
+        ...(Object.keys(limits).length > 0 ? { limits } : {}),
+      });
+      return {
+        today: { tier: r.baseline.tier, reasons: r.baseline.reasons },
+        underHypothesis: { tier: r.hypothetical.tier, reasons: r.hypothetical.reasons },
+        morePermissive: r.morePermissive,
+        summary: r.summary,
+      };
+    }
     case 'get_recent_activity': {
       const limit = clampLimit(args.limit);
       return ctx.audit.read().slice(-limit).map(({ seq, ts, type, data }) => ({ seq, ts, type, data }));
@@ -248,10 +296,13 @@ async function dispatchTool(name: string, args: Record<string, unknown>, ctx: To
     case 'fetch_paid_data': {
       if (!ctx.x402ApiUrl) return { error: 'The paid API is not configured (set X402_API_URL).' };
       const url = String(args.url ?? '');
+      const chain = ctx.clients.chain;
       return fetchPaidData(url, new URL(ctx.x402ApiUrl).origin, {
         fetchFn: fetch,
         execute: (intent) => ctx.executor.execute(intent),
         network: chain.name,
+        caip2: `eip155:${chain.id}`,
+        from: ctx.clients.account?.address,
         symbol: ctx.policy.native.symbol,
       });
     }
