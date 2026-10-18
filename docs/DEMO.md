@@ -60,13 +60,17 @@ control (not on the allowlist).
 ## 2:45 — The interesting part: denial with a way forward (T3)
 
 1. Ask the agent (chat panel) or Transfer page: send `0.5` ETH to alice.
-2. **T3 denied** with reasons: "above hard per-tx cap (0.0005)",
+2. **T3 denied** with reasons: "above hard per-tx cap (0.005)",
    "above remaining daily budget".
 3. The agent does not just refuse — it proposes a compliant alternative
    ("would you like 0.0001 instead?") thanks to the system prompt + few-shots.
 4. Bonus: paste a hostile memo from `test/injection.test.ts` into a *token
    name/memo* field context and show the policy still denies; the model treats
    tool output as `<untrusted>` data.
+5. **"What if?" counterfactual**: `npm run cli -- whatif 0x2222222222222222222222222222222222222222 0.0002 --allow`
+   shows the verdict today (T2, new recipient) beside the verdict if that
+   recipient were already allowlisted (T1) — read-only, nothing is sent. The
+   `what_if` agent tool answers the same question in chat.
 
 ## 3:45 — Kill switch + audit evidence
 
@@ -88,18 +92,24 @@ control (not on the allowlist).
    > "Even with the agent's private key fully stolen, the chain caps the loss
    > at one day's limit. Off-chain policy is the UX; on-chain limits are the
    > backstop."
-3. Optional (30 s): x402-style paid API — `npm run x402:api` in one terminal,
+3. Optional (30 s): x402 v2 paid API — `npm run x402:api` in one terminal,
    ask the agent for market data; the 0.0002 ETH payment is a normal
-   `native_transfer` intent (T1), with its hash in the evidence file.
+   `native_transfer` intent (T1), with its hash in the evidence file. The client
+   speaks x402 v2 (CAIP-2 network, base64 `PaymentPayload` proof) and never
+   re-pays a `settlement_pending` answer.
+4. Optional (20 s): **task budget envelope** — `npm run cli -- send <to> 0.0005 --task demo --task-max 0.001`
+   twice succeeds, a third is denied ("Task budget exceeded"), bounding one goal
+   independently of the daily budget.
 
 ## Zero-key fallback (no LLM, no funded wallet)
 
 Everything except live signing works offline against the real engine:
 
 ```bash
-npm test                                   # 162 unit tests
+npm test                                   # full unit suite
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 0.0002   # T1 + reasons
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1        # T3 + reasons
+npm run cli -- whatif  0x2222222222222222222222222222222222222222 0.0002 --allow   # T2 → T1, nothing sent
 npm run cli -- audit verify                # chain intact
 cat docs/EXECUTION_EVIDENCE.md             # recorded live hashes
 ```

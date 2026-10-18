@@ -80,4 +80,25 @@ describe('renderEvidence', () => {
     const md = renderEvidence([], { auditLogPath: 'data/audit.jsonl', chainIntegrity: { ok: true } });
     expect(md).not.toContain('## AgentVault');
   });
+
+  it('renders the v1 and v2 vaults side by side when both are configured', () => {
+    const md = renderEvidence([], {
+      auditLogPath: 'data/audit.jsonl',
+      chainIntegrity: { ok: true },
+      vault: { address: '0xV1', explorerBase: 'https://sepolia.basescan.org' },
+      vaults: [
+        {
+          title: 'AgentVault v2 (session keys + ERC-20)',
+          address: '0xV2',
+          deployTx: '0xdeploy2',
+          txs: [{ label: 'Session-key within-limit send', hash: '0xsess', result: 'confirmed' }],
+          explorerBase: 'https://sepolia.basescan.org',
+        },
+      ],
+    });
+    expect(md).toContain('## AgentVault (on-chain enforcement)');
+    expect(md).toContain('## AgentVault v2 (session keys + ERC-20) (on-chain enforcement)');
+    expect(md).toContain('https://sepolia.basescan.org/address/0xV2');
+    expect(md).toContain('https://sepolia.basescan.org/tx/0xsess');
+  });
 });
