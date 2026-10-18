@@ -58,6 +58,39 @@ test('previewing an allowlisted transfer shows T1 and sends nothing', async ({ p
   expect(await audit.text()).not.toContain('tx_sent');
 });
 
+test('recipient lists give the label its own column and never overlap the button', async ({ page }) => {
+  await ensureSignedIn(page);
+
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Recipients', exact: true }) });
+  await card.scrollIntoViewIfNeeded();
+
+  // Regression guard: the labels used to fall into the 28px avatar column of
+  // the shared .team grid and wrapped into a one-letter-per-line sliver.
+  const row = card.locator('.policy-list li').first();
+  const name = await row.locator('.team-name').boundingBox();
+  const button = await row.getByRole('button', { name: /remove/i }).boundingBox();
+  expect(name, 'the first allowlist row renders a label').not.toBeNull();
+  expect(name!.width).toBeGreaterThanOrEqual(60);
+  expect(button).not.toBeNull();
+  const overlaps = name!.x < button!.x + button!.width && button!.x < name!.x + name!.width;
+  expect(overlaps, 'label and Remove button occupy disjoint columns').toBe(false);
+
+  const scrollW = await page.evaluate(() => document.scrollingElement!.scrollWidth);
+  const innerW = await page.evaluate(() => window.innerWidth);
+  expect(scrollW).toBeLessThanOrEqual(innerW + 1);
+});
+
+test('the receive dialog closes with Escape', async ({ page }) => {
+  await ensureSignedIn(page);
+
+  await page.getByRole('button', { name: /receive/i }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'Receive funds' });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+});
+
 test('security page shows the policy fingerprint and the guard rails', async ({ page }) => {
   await ensureSignedIn(page);
 

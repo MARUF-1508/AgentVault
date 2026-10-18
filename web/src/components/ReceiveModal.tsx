@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { useEffect } from 'react';
 import { useWallet } from '../data';
 import { CopyButton } from '../format';
 
@@ -8,6 +9,17 @@ import { CopyButton } from '../format';
 export default function ReceiveModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { status } = useWallet();
   const address = status?.address ?? null;
+
+  // Escape closes it like the command palette; the overlay click alone is not
+  // discoverable (and a stuck overlay blocks the whole page).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
 
   return (
     <AnimatePresence>

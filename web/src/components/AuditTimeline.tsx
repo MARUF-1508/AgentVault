@@ -67,9 +67,43 @@ function detail(e: ActivityEntry, explorer: string | null): ReactNode {
       return `${String(d.stage ?? '')}: ${String(d.error ?? d.hash ?? '')}`;
     case 'kill_switch':
       return `${d.paused ? 'paused' : 'resumed'}${d.by ? ` from the ${String(d.by)}` : ''}${d.user ? ` by ${String(d.user)}` : ''}`;
-    case 'access':
-      if (d.event === 'decide') return `${String(d.user)} ${d.approved ? 'approved' : 'rejected'} a T2 request`;
-      return `${String(d.user)} sign-in ${d.ok ? 'succeeded' : 'failed'}${d.reason ? ` (${String(d.reason)})` : ''}`;
+    case 'access': {
+      // Access covers sign-in and every owner-only change; a missing user (a
+      // failed login for an unknown name) or a missing 'ok' must not render
+      // as the literal string "undefined".
+      const who = String(d.user ?? d.by ?? 'unknown');
+      switch (d.event) {
+        case 'decide':
+          return `${who} ${d.approved ? 'approved' : 'rejected'} a T2 request`;
+        case 'login':
+        case 'sign_in':
+          return `${who} sign-in ${d.ok ? 'succeeded' : 'failed'}${d.reason ? ` (${String(d.reason).replace(/_/g, ' ')})` : ''}`;
+        case 'setup':
+          return `${who} created the owner account`;
+        case 'totp_setup_started':
+          return `${who} started two-factor setup`;
+        case 'totp_enabled':
+          return `${who} turned on two-factor${d.revoked ? ` (${String(d.revoked)} other session(s) signed out)` : ''}`;
+        case 'totp_disabled':
+          return `${who} turned off two-factor`;
+        case 'sessions_revoked':
+          return `${who} signed out ${String(d.revoked ?? '')} other session(s)`.replace('  ', ' ');
+        case 'user_added':
+          return `${who} added ${String(d.user ?? 'an account')} as ${String(d.role ?? 'member')}`;
+        case 'user_removed':
+          return `${who} removed ${String(d.user ?? 'an account')}`;
+        case 'recipient_added':
+          return `${who} allowlisted ${String(d.label ?? d.address ?? 'a recipient')}`;
+        case 'recipient_removed':
+          return `${who} removed ${String(d.label ?? d.address ?? 'a recipient')} from the allowlist`;
+        case 'deny_added':
+          return `${who} denied ${shortAddr(String(d.address ?? ''))}`;
+        case 'deny_removed':
+          return `${who} un-denied ${shortAddr(String(d.address ?? ''))}`;
+        default:
+          return `${who} ${String(d.event ?? 'access').replace(/_/g, ' ')}`;
+      }
+    }
     default:
       return JSON.stringify(d).slice(0, 80);
   }

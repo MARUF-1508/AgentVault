@@ -320,11 +320,11 @@ function Recipients() {
           Your role ({me?.role}) cannot change the recipient lists. An owner edits them here, or from the CLI with{' '}
           <code>npm run cli -- recipient</code>.
         </p>
-        <ul className="team">
+        <ul className="policy-list">
           {Object.entries(allowlist).map(([l, a]) => (
             <li key={l}>
               <span className="team-name">{l}</span>
-              <span className="mono muted small">{a}</span>
+              <span className="mono muted small addr">{a}</span>
             </li>
           ))}
         </ul>
@@ -365,11 +365,11 @@ function Recipients() {
       </p>
 
       <h3>Known recipients (allowlist)</h3>
-      <ul className="team">
+      <ul className="policy-list">
         {Object.entries(allowlist).map(([l, a]) => (
           <li key={l}>
             <span className="team-name">{l}</span>
-            <span className="mono muted small">{a}</span>
+            <span className="mono muted small addr">{a}</span>
             <button
               className="ghost small"
               disabled={busy}
@@ -384,10 +384,10 @@ function Recipients() {
       </ul>
 
       <h3>Denied (refused outright, T3)</h3>
-      <ul className="team">
+      <ul className="policy-list denied">
         {denylist.map((a) => (
           <li key={a}>
-            <span className="mono muted small">{a}</span>
+            <span className="mono muted small addr">{a}</span>
             <button
               className="ghost small"
               disabled={busy}

@@ -210,7 +210,9 @@ input:focus, select:focus { outline: none; border-color: var(--accent); box-shad
 /* Chat */
 .chat { display: flex; flex-direction: column; min-height: min(640px, 75vh); margin: 0; }
 .chat-log { flex: 1; overflow-y: auto; max-height: 60vh; margin: 0.75rem 0; padding-right: 0.25rem; display: flex; flex-direction: column; gap: 0.6rem; }
-.empty { margin: auto 0; }
+/* Top-aligned on purpose: the log keeps its content at the top and the
+   composer sits at the bottom, with the free space in between. */
+.empty { margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
 .chip { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 999px; font-size: 0.8rem; font-weight: 500; padding: 0.32rem 0.8rem; }
 .chip:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
@@ -300,6 +302,15 @@ th.mine { color: var(--accent-2); }
 .team-name { font-weight: 600; overflow-wrap: anywhere; }
 .team-add { margin-top: 0.75rem; flex-wrap: wrap; }
 .team-add input { flex: 1 1 10rem; }
+
+/* Recipient lists (Settings -> Recipients): label | address | action.
+   Deliberately not .team: that grid starts with a 28px avatar column and
+   squeezes the label into a vertical sliver. */
+.policy-list { list-style: none; margin: 0.6rem 0; padding: 0; display: grid; gap: 0.2rem; }
+.policy-list li { display: grid; grid-template-columns: minmax(4.5rem, 10rem) minmax(0, 1fr) auto; gap: 0.75rem; align-items: center; padding: 0.45rem 0.4rem; border-radius: 10px; transition: background-color 0.15s; }
+.policy-list li:hover { background: var(--surface-2); }
+.policy-list.denied li { grid-template-columns: minmax(0, 1fr) auto; }
+.policy-list .addr { overflow-wrap: anywhere; }
 .fresh-pass { border: 1px dashed var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 0.7rem 0.9rem; margin-top: 0.6rem; }
 .fresh-pass p { margin: 0.2rem 0; }
 .fresh-pass code { font-size: 0.95rem; }

@@ -14,6 +14,23 @@ export function TierBadge({ tier }: { tier: string }) {
 
 export const shortAddr = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
+/**
+ * Display-only: shorten a decimal string to at most 8 significant digits so a
+ * wallet balance does not read as 0.094954698377520177. String arithmetic, so
+ * the value itself never passes through a JS number; the caller keeps the full
+ * value in a title attribute.
+ */
+export function shortAmount(value: string): string {
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(value.trim());
+  if (!m) return value;
+  const whole = m[1].replace(/^0+/, '') || '0';
+  const frac = m[2] ?? '';
+  const keep = 8 - (whole === '0' ? 0 : whole.length);
+  if (keep <= 0) return m[1].replace(/^0+/, '') || '0';
+  const trimmed = frac.slice(0, keep).replace(/0+$/, '');
+  return trimmed ? `${m[1]}.${trimmed}` : m[1];
+}
+
 /** Engine reasons arrive joined by spaces; split them back into sentences. */
 export const splitReasons = (why: string) => why.split(/(?<=[.!])\s+(?=[A-Z0-9])/).filter(Boolean);
 

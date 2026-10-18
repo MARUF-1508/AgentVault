@@ -19,7 +19,9 @@ export function WalletDataProvider({ children }: { children: ReactNode }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [status, statusError] = usePoll(getStatus, 5_000, [refreshKey]);
   const [budget] = usePoll(getBudget, 10_000, [refreshKey]);
-  const [policy] = usePoll(getPolicy, 60_000);
+  // Also keyed on refreshKey: recipient-list edits must show up immediately,
+  // not after the next 60-second poll.
+  const [policy] = usePoll(getPolicy, 60_000, [refreshKey]);
   return (
     <DataContext.Provider value={{ status, statusError, budget, policy, refreshKey, refresh: () => setRefreshKey((k) => k + 1) }}>
       {children}
