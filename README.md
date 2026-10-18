@@ -104,6 +104,9 @@ npm run cli -- audit                               # last 20 audit entries
 npm run cli -- audit verify                        # detect tampering
 npm run cli -- serve [--port N]                    # web UI on http://127.0.0.1:5174 (loopback only, sign-in)
 npm run cli -- user add <name> <role>               # web UI account: owner | operator | viewer
+npm run cli -- recipient list                        # allowlist + denylist
+npm run cli -- recipient add <label> <address>       # add a known recipient (audited)
+npm run cli -- deny add <address>                    # refuse an address outright
 npm run cli -- x402 <resource>                     # paid API demo: pay + fetch (needs X402_API_URL)
 npm run evidence                                   # docs/EXECUTION_EVIDENCE.md with tx hashes
 npm run e2e                                        # Playwright smoke: setup → dashboard → T1 preview
@@ -154,8 +157,20 @@ VAULT_ADDRESS=0x098f7Cb9b09cAdB87c2cf8FFa1705a2BD1469388
 
 Native transfers are then sent as zero-value `agentSend` calls paid out of the
 vault, so the per-tx cap, daily limit and allowlist are re-enforced on-chain
-(even a stolen agent key is capped). Policy evaluation is unchanged; ERC-20 and
-swaps are unaffected. `VAULT=true` without `VAULT_ADDRESS` refuses to start.
+(even a stolen agent key is capped). Policy evaluation is unchanged; swaps are
+unaffected. `VAULT=true` without `VAULT_ADDRESS` refuses to start.
+
+**Vault v2 — session keys and ERC-20.** `contracts/AgentVaultV2.sol` adds
+owner-granted, expiring **session keys** capped below the vault's own limits, plus
+an ERC-20 entrypoint. `agentSend` keeps v1's exact signature, so pointing
+`VAULT_ADDRESS` at a v2 vault needs no code change; add `VAULT_TOKENS=true` to
+route ERC-20 transfers through `agentSendToken` too:
+
+```bash
+VAULT=true VAULT_ADDRESS=<v2 address> VAULT_TOKENS=true
+```
+
+See `docs/VAULT_V2.md` for the model, invariants, deploy/grant steps and tests.
 
 ---
 
@@ -168,12 +183,12 @@ OpenAI-compatible LLM tier, Foundry, Vite.
 **Zero-key path (2 minutes, no wallet, no LLM key):**
 
 ```bash
-npm install && npm test                # 162 unit tests, offline
+npm install && npm test                # 232 unit tests, offline
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 0.0002   # T1 verdict, nothing sent
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1        # T3 verdict + reasons
 npm run cli -- audit verify             # tamper check (empty log reads intact)
 cat docs/EXECUTION_EVIDENCE.md          # our real testnet hashes + vault reverts
-forge install foundry-rs/forge-std --no-commit && forge test   # 12 contract tests
+forge install foundry-rs/forge-std --no-commit && forge test   # 12 (v1) + 37 (v2) contract tests
 ```
 
 **Full signing path (about 5 minutes, still free):** follow Setup steps 2–5
@@ -186,11 +201,12 @@ address you control). All demo amounts are tiny on purpose. A ready-made
 | Criterion | Where |
 |---|---|
 | Task completion (40%) | `docs/DEMO.md` (working flow), `src/agent/`, `src/policy/`, `src/executor/`; live hashes in `docs/EXECUTION_EVIDENCE.md` |
-| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, R1–R17), `test/` (162 unit + 12 Foundry), `contracts/AgentVault.sol` |
-| Innovation & interaction (30%) | Denial-with-alternative UX, tier preview without LLM, voice chat, approval cards, policy fingerprint, x402 paid-data flow, agent-wallet skill (`AGENTS.md`, `.opencode/`) |
-| On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls, vault-routing mode, x402 payment — all with tx hashes in `docs/EXECUTION_EVIDENCE.md` |
+| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R18), `test/` (232 unit + 49 Foundry), `contracts/AgentVault.sol` |
+| Innovation & interaction (30%) | Denial-with-alternative UX, tier preview without LLM, counterfactual **what-if** simulator, **task budget envelope**, **stale-allowance cleanup**, voice chat, approval cards, policy fingerprint, explanation of every decision, x402 **v2** paid-data flow, agent-wallet skill (`AGENTS.md`, `.opencode/`) |
+| On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls; `AgentVaultV2.sol` session keys + ERC-20; vault-routing mode; x402 payment — with tx hashes in `docs/EXECUTION_EVIDENCE.md` |
 | Architecture / technical doc | `docs/TECHNICAL.md` |
 | Evidence of real runs | `docs/EXECUTION_EVIDENCE.md` (regenerate: `npm run evidence`) |
+| Presentation deck (≤ 10 min) | `docs/deck.pdf` (source: `docs/deck.html`) |
 
 ---
 
@@ -206,11 +222,12 @@ src/
   policy/engine.ts      ★ the policy firewall (pure function)
   policy/types.ts       Policy, Intent, tiers, risk inputs
   policy/state.ts       daily spend + rate limit, derived from the audit log
+  policy/whatif.ts      counterfactual "what-if" evaluations (pure, read-only)
   executor/executor.ts  policy → simulate → approve → sign → receipt → audit
   approval/approver.ts  human-in-the-loop: CLI prompt, WebApprover queue, DenyAll
   audit/log.ts          hash-chained, append-only JSONL log
   chain/client.ts       viem clients, mainnet guard
-  chain/vault.ts        AgentVault ABI (agentSend)
+  chain/vault.ts        AgentVault / AgentVaultV2 ABIs (agentSend, agentSendToken)
   dex/uniswap.ts        Uniswap v3 quoter + swap calldata (swap intent)
   prices/price.ts       USD valuation: Chainlink feed, else labelled testnet table
   portfolio/portfolio.ts T0 read-only balances + USD total
@@ -220,18 +237,20 @@ src/
   auth/users.ts         web accounts (scrypt, roles) + sessions
   auth/totp.ts          RFC 6238 TOTP second factor (pure, clock-injected)
   auth/rbac.ts          role → permission matrix
-  x402.ts               paid-API client: 402 schema, policy-gated payment
+  x402.ts               paid-API client: v2-conformant 402 schema, CAIP-2, policy-gated payment
   schedule/rules.ts     scheduled / conditional rule schema + due calculation
   schedule/runner.ts    runs due rules through the executor
-contracts/AgentVault.sol  on-chain spending limits (challenge bonus)
+contracts/AgentVault.sol    on-chain spending limits (challenge bonus; deployed, frozen)
+contracts/AgentVaultV2.sol  session keys + ERC-20 (new file, own address)
 web/                    Vite + React UI: chat, portfolio, approval card, timeline
-script/DeployAgentVault.s.sol  Foundry deploy script
+script/DeployAgentVault.s.sol    Foundry deploy script (v1)
+script/DeployAgentVaultV2.s.sol  Foundry deploy script (v2)
 scripts/                  keygen, evidence, x402 demo API
 foundry.toml              Foundry config (AgentVault tests + deploy)
 config/policy.json        limits, allowlists, swap router, prices, risk
 config/schedules.json     scheduled / conditional rules (user config)
-test/                     vitest unit tests (19 files, 162 tests)
-test/contracts/           Foundry tests for AgentVault (12, incl. fuzzing)
+test/                     vitest unit tests (24 files, 232 tests)
+test/contracts/           Foundry tests: AgentVault 12 and AgentVaultV2 37 (incl. fuzzing)
 e2e/                      Playwright smoke tests (real server + built UI)
 Dockerfile, docker-compose.yml  one-command container (loopback publish)
 docs/                     plan, technical doc, demo script, security self-assessment, evidence
@@ -260,17 +279,18 @@ npm run typecheck
 Every security claim in `docs/SECURITY_SELF_ASSESSMENT.md` should have a test. Add one with every new rule.
 
 ### Contract tests (Foundry)
-`contracts/AgentVault.sol` enforces the caps on-chain, so a stolen agent key can't exceed them. Its tests live in `test/contracts/` and need [Foundry](https://book.getfoundry.sh/):
+`contracts/AgentVault.sol` (v1) and `contracts/AgentVaultV2.sol` (session keys + ERC-20) enforce the caps on-chain, so a stolen key can't exceed them. Their tests live in `test/contracts/` and need [Foundry](https://book.getfoundry.sh/):
 ```bash
 forge install foundry-rs/forge-std   # once
-forge test                           # per-tx cap, daily reset, non-agent revert, pause, allowlist, owner-only
+forge test                           # v1: per-tx cap, daily reset, non-agent revert, pause, allowlist, owner-only
+                                     # v2: session caps ≤ vault, expiry, restricted targets fail closed, token limits, reentrancy, fuzz
 ```
 
 ## Deploying AgentVault (stretch)
 The vault is deployed by the **owner** (a key different from the agent's). With [Foundry](https://book.getfoundry.sh/):
 ```bash
 forge install foundry-rs/forge-std --no-commit   # once per clone (lib/ is git-ignored)
-forge test                                       # 12 contract tests, no network needed
+forge test                                       # 49 contract tests (12 v1 + 37 v2), no network needed
 export AGENT_ADDRESS=0x...                       # the agent's funded key
 export VAULT_MAX_PER_TX=500000000000000          # 0.0005 ether
 export VAULT_DAILY_LIMIT=10000000000000000       # 0.01 ether
@@ -278,6 +298,9 @@ export VAULT_FUNDING=10000000000000000           # optional
 forge script script/DeployAgentVault.s.sol \
   --rpc-url https://sepolia.base.org --private-key <OWNER_KEY> --broadcast
 ```
+For the v2 contract (session keys + ERC-20), use `script/DeployAgentVaultV2.s.sol`
+and (optionally) `VAULT_RECIPIENT`, `VAULT_TOKEN`, `VAULT_TOKEN_DAILY_LIMIT`. See
+[`docs/VAULT_V2.md`](docs/VAULT_V2.md) for granting session keys.
 Or the one-liner equivalent:
 ```bash
 forge create contracts/AgentVault.sol:AgentVault \
@@ -289,11 +312,11 @@ forge create contracts/AgentVault.sol:AgentVault \
 ## Limitations (honest list)
 
 - **Testnet only.** Mainnet is refused by a guard in `src/chain/client.ts`; the agent key is a hot key in `.env`. Never fund it with real value.
-- **ERC-20 is not covered by the on-chain vault.** In `VAULT=true` mode only native ETH flows through `AgentVault`; token transfers come from the agent EOA, bounded by the off-chain policy only (known risk R16).
+- **ERC-20 on-chain coverage is opt-in.** v1 `AgentVault` moves only native ETH. Deploy `AgentVaultV2` and set `VAULT_TOKENS=true` to route ERC-20 transfers through `agentSendToken` under an on-chain token cap; until a v2 vault is deployed, token transfers come from the agent EOA bounded by the off-chain policy only (R16).
 - **Address-poisoning detection is a heuristic** (shared leading/trailing hex digits). It can be evaded by a crafted near-miss; new recipients are still T2, so a human sees the full address (R11).
-- **Budgets race under concurrency in theory.** The re-check before signing makes this small in the single-process CLI; a multi-writer deployment needs a lock (R6).
+- **Concurrent budgets are safe within one process.** An execution reserves its amount before re-checking and broadcasting, so a second concurrent request cannot spend the same budget; two server processes over one audit log would still race, which is not a supported deployment (R6).
 - **The audit log is tamper-evident, not immutable.** Full deletion resets budgets; anchoring the head hash on-chain is future work (R4).
-- **No account abstraction.** The vault path uses a plain EOA with a capped contract; ERC-4337 session keys are roadmap.
+- **Session keys are not ERC-4337.** `AgentVaultV2` implements owner-granted, expiring, capped session keys directly; a full account-abstraction stack (bundlers, paymasters) is roadmap. The vault path uses a plain EOA with a capped contract.
 - **USDC and swaps depend on testnet liquidity** (Circle faucet, Uniswap v3 on Base Sepolia); quotes can be far from market (R10).
 - Full list with likelihood/impact/mitigation: `docs/SECURITY_SELF_ASSESSMENT.md` §4.
 

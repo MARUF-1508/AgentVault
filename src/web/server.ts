@@ -13,8 +13,9 @@ import { generateTotpSecret, otpauthUri, verifyTotp } from '../auth/totp.js';
 import { LoginThrottle, Sessions, type User, type UserStore } from '../auth/users.js';
 import type { Env } from '../config.js';
 import { pauseWallet } from '../policy/killswitch.js';
+import { addDenied, addRecipient, applyPolicy, removeDenied, removeRecipient, writePolicyAtomic } from '../policy/edit.js';
 import { spendStateFrom } from '../policy/state.js';
-import { IntentSchema } from '../policy/types.js';
+import { ActionIntentSchema, IntentSchema } from '../policy/types.js';
 import { dailyStats } from '../report/stats.js';
 
 export interface WebServerOptions {
@@ -24,14 +25,14 @@ export interface WebServerOptions {
   /** Directory with the built UI (`web/dist`). Missing dir => JSON hint. */
   distDir?: string;
   /** Set in VAULT=true mode, so the UI can show that on-chain caps apply. */
-  vault?: { address: `0x${string}` };
+  vault?: { address: `0x${string}`; tokens?: boolean };
   /** Web-UI accounts. Every /api route except login needs a session. */
   users: UserStore;
   sessions?: Sessions;
 }
 
 /** Which permission each API route needs. Anything not listed is 404. */
-const ROUTES: Record<string, Permission> = {
+export const ROUTES: Record<string, Permission> = {
   'GET /api/status': 'read',
   'GET /api/budget': 'read',
   'GET /api/info': 'read',
@@ -50,6 +51,13 @@ const ROUTES: Record<string, Permission> = {
   'POST /api/chat': 'chat',
   'POST /api/decide': 'approve',
   'POST /api/pause': 'pause',
+  // Recipient lists. Owner-only ('admin'), never a tool, so the LLM cannot reach
+  // them. The two directions that lower a recipient's tier also need the owner's
+  // password again.
+  'POST /api/policy/recipients/add': 'admin',
+  'POST /api/policy/recipients/remove': 'admin',
+  'POST /api/policy/deny/add': 'admin',
+  'POST /api/policy/deny/remove': 'admin',
 };
 
 /** First 16 hex chars of the policy file's sha256, shown in the UI. */
@@ -83,6 +91,10 @@ const LoginSchema = z.object({
 const SetupSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/), password: z.string().min(10).max(200) });
 const AddUserSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/), role: z.enum(ROLES) });
 const RemoveUserSchema = z.object({ username: z.string().regex(/^[a-z0-9_-]{2,32}$/) });
+const AddRecipientSchema = z.object({ label: z.string(), address: z.string(), password: z.string().max(200).optional() });
+const RemoveRecipientSchema = z.object({ label: z.string() });
+const DenySchema = z.object({ address: z.string() });
+const UndenySchema = z.object({ address: z.string(), password: z.string().max(200).optional() });
 
 function cookieToken(req: IncomingMessage): string | undefined {
   for (const part of (req.headers.cookie ?? '').split(';')) {
@@ -120,11 +132,12 @@ function hostnameOf(value: string | undefined, withScheme: boolean): string | nu
 }
 
 /**
- * Browser-facing guard for a server with no auth. A Host header that is not
- * loopback means DNS rebinding; an Origin that is not loopback means another
- * website is calling us. POSTs must be JSON, which forces a CORS preflight that
- * this server never answers, so a cross-site form or no-cors fetch cannot
- * approve a T2 or trigger a transaction.
+ * First line of defence, ahead of sign-in: a Host header that is not loopback
+ * means DNS rebinding; an Origin that is not loopback means another website is
+ * calling us. POSTs must be JSON, which forces a CORS preflight that this server
+ * never answers, so a cross-site form or no-cors fetch cannot approve a T2 or
+ * trigger a transaction. Every /api route beyond login and first-run setup then
+ * still requires a signed-in session (see ROUTES).
  */
 function rejectForeign(req: IncomingMessage): { status: number; error: string } | null {
   const host = hostnameOf(req.headers.host, false);
@@ -175,10 +188,12 @@ const STATIC_TYPES: Record<string, string> = {
 };
 
 /**
- * Local demo server for the web UI. Binds loopback only and has no auth, so it
- * must never be exposed beyond the owner's machine. All state changes still go
- * through the executor (approvals via the shared WebApprover), so the policy
- * firewall applies exactly as in the CLI.
+ * Web UI server. It binds loopback only (published as 127.0.0.1:8787 in Docker),
+ * so it must never be exposed beyond the owner's machine. Sign-in is required
+ * for every /api route except login and first-run setup, and role-based access
+ * is enforced server-side. All state changes still go through the executor
+ * (approvals via the shared WebApprover), so the policy firewall applies exactly
+ * as in the CLI.
  */
 export function createServer(opts: WebServerOptions): Server {
   const { env, ctx, approver } = opts;
@@ -190,7 +205,10 @@ export function createServer(opts: WebServerOptions): Server {
   const chats = new Map<string, OpenAI.Chat.Completions.ChatCompletionMessageParam[]>();
   // Unconfirmed TOTP secrets: enabled only after one valid code (10-minute window).
   const pendingTotp = new Map<string, { secret: string; at: number }>();
-  const policyHash = policyHashOf(env.POLICY_FILE);
+  // Recomputed per request, never cached: the owner can edit the recipient lists
+  // at runtime, and a fingerprint that lags behind would make the UI lie about
+  // which policy is loaded.
+  const policyHash = () => policyHashOf(env.POLICY_FILE);
 
   // Strict CSP; the one inline script (pre-paint theme pick) is hash-allowed.
   let scriptSrc = "'self'";
@@ -317,7 +335,11 @@ export function createServer(opts: WebServerOptions): Server {
         }
         users.setTotp(user.username, pending.secret);
         pendingTotp.delete(user.username);
-        ctx.audit.append('access', { event: 'totp_enabled', user: user.username });
+        // Changing the second factor changes what counts as this account, so end
+        // every other session: anyone holding a token minted before 2FA was on is
+        // now signed out. The session performing the change is kept.
+        const revoked = sessions.destroyUserExcept(user.username, cookieToken(req));
+        ctx.audit.append('access', { event: 'totp_enabled', user: user.username, revoked });
         return send(res, 200, { enabled: true });
       }
       if (req.method === 'POST' && path === '/api/auth/totp/disable') {
@@ -329,7 +351,10 @@ export function createServer(opts: WebServerOptions): Server {
           return send(res, 401, { error: 'Wrong password.' });
         }
         users.setTotp(user.username, null);
-        ctx.audit.append('access', { event: 'totp_disabled', user: user.username });
+        // Turning the second factor off is itself a security-relevant change:
+        // end every other session, keeping only the one doing it.
+        const revoked = sessions.destroyUserExcept(user.username, cookieToken(req));
+        ctx.audit.append('access', { event: 'totp_disabled', user: user.username, revoked });
         return send(res, 200, { enabled: false });
       }
       if (req.method === 'POST' && path === '/api/auth/sessions/revoke') {
@@ -353,7 +378,7 @@ export function createServer(opts: WebServerOptions): Server {
           explorer: chain.blockExplorers?.default.url ?? null,
           paused: spendStateFrom([], env.PAUSE_FILE).paused,
           vault: vault?.address ?? null,
-          policyHash,
+          policyHash: policyHash(),
           llm: Boolean(env.LLM_API_KEY),
           model: env.LLM_API_KEY ? env.LLM_MODEL : null,
         });
@@ -394,6 +419,77 @@ export function createServer(opts: WebServerOptions): Server {
         sessions.destroyUser(username);
         ctx.audit.append('access', { event: 'user_removed', by: user!.username, user: username });
         return send(res, 200, { removed: true });
+      }
+
+      // Owner-only recipient-list edits. Hand-editing config/policy.json used to be
+      // the only way to change these, which left every change unaudited and unchecked;
+      // these routes make it an owner-only, re-authenticated, logged operation.
+      if (path.startsWith('/api/policy/recipients/') || path.startsWith('/api/policy/deny/')) {
+        // Adding a known recipient, or un-denying one, lowers the tier that address
+        // gets, so those two need the owner's password again.
+        const escalating = path === '/api/policy/recipients/add' || path === '/api/policy/deny/remove';
+        const schema =
+          path === '/api/policy/recipients/add'
+            ? AddRecipientSchema
+            : path === '/api/policy/recipients/remove'
+              ? RemoveRecipientSchema
+              : path === '/api/policy/deny/add'
+                ? DenySchema
+                : UndenySchema;
+        const parsed = schema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Check the recipient fields and try again.' });
+        if (escalating) {
+          const password = (parsed.data as { password?: unknown }).password;
+          if (typeof password !== 'string' || !password) {
+            return send(res, 403, { error: 'This change lowers the tier for that address. Confirm your password to continue.' });
+          }
+          if (!users.verify(user!.username, password)) {
+            throttle.fail(user!.username);
+            return send(res, 401, { error: 'Wrong password.' });
+          }
+        }
+        const before = policyHash();
+        let next;
+        try {
+          if (path === '/api/policy/recipients/add') {
+            const { label, address } = parsed.data as z.infer<typeof AddRecipientSchema>;
+            next = addRecipient(ctx.policy, label, address);
+          } else if (path === '/api/policy/recipients/remove') {
+            const { label } = parsed.data as z.infer<typeof RemoveRecipientSchema>;
+            next = removeRecipient(ctx.policy, label);
+          } else if (path === '/api/policy/deny/add') {
+            const { address } = parsed.data as z.infer<typeof DenySchema>;
+            next = addDenied(ctx.policy, address);
+          } else {
+            const { address } = parsed.data as z.infer<typeof UndenySchema>;
+            next = removeDenied(ctx.policy, address);
+          }
+        } catch (err) {
+          return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        // Write first, then swap the live object: if the file system refuses (the
+        // Docker image mounts config/ read-only) nothing changes at all.
+        try {
+          writePolicyAtomic(env.POLICY_FILE, next);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          return send(res, code === 'EROFS' ? 409 : 500, {
+            error:
+              code === 'EROFS'
+                ? 'The policy file is read-only in this deployment. Edit config/policy.json or use npm run cli -- recipient.'
+                : 'Could not write the policy file.',
+          });
+        }
+        applyPolicy(ctx.policy, next);
+        const event = path.endsWith('/add')
+          ? path.includes('deny')
+            ? 'deny_added'
+            : 'recipient_added'
+          : path.includes('deny')
+            ? 'deny_removed'
+            : 'recipient_removed';
+        ctx.audit.append('access', { event, by: user!.username, escalated: escalating, policyHashBefore: before, policyHashAfter: policyHash() });
+        return send(res, 200, { policyHash: policyHash(), allowlist: ctx.policy.recipients.allowlist, denylist: ctx.policy.recipients.denylist });
       }
 
       if (req.method === 'GET' && path === '/api/info') {
@@ -439,7 +535,12 @@ export function createServer(opts: WebServerOptions): Server {
       if (req.method === 'POST' && (path === '/api/preview' || path === '/api/transact')) {
         const parsed = TransactSchema.safeParse(await readBody(req));
         if (!parsed.success) return send(res, 400, { error: 'Body must be { intent }.' });
-        const intent = IntentSchema.safeParse(parsed.data.intent);
+        // /api/transact is the generic path for transfers and approvals only. A swap
+        // must go through the execute_swap orchestration, which prices it and sends a
+        // bounded approval first; accepting one here would bypass that. /api/preview
+        // stays read-only, so it may still preview any intent.
+        const schema = path === '/api/transact' ? ActionIntentSchema : IntentSchema;
+        const intent = schema.safeParse(parsed.data.intent);
         if (!intent.success) {
           return send(res, 400, { error: 'Invalid intent', issues: intent.error.issues.map((i) => i.message) });
         }

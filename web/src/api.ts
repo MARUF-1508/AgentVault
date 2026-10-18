@@ -163,3 +163,17 @@ export const preview = (intent: TransferIntent) => post<{ tier: Tier; reasons: s
 export const transact = (intent: TransferIntent) => post<TransactResult>('/api/transact', { intent });
 export const chat = (message: string, session?: string) =>
   post<{ session: string; answer: string; events?: string[] }>('/api/chat', { message, session });
+
+/** Recipient lists after an edit, plus the new policy fingerprint. */
+export interface RecipientLists {
+  policyHash: string;
+  allowlist: Record<string, string>;
+  denylist: string[];
+}
+// Adding a known recipient and un-denying one lower the tier an address gets, so
+// the server asks for the owner's password again on those two calls.
+export const addRecipient = (label: string, address: string, password: string) =>
+  post<RecipientLists>('/api/policy/recipients/add', { label, address, password });
+export const removeRecipient = (label: string) => post<RecipientLists>('/api/policy/recipients/remove', { label });
+export const addDenied = (address: string) => post<RecipientLists>('/api/policy/deny/add', { address });
+export const removeDenied = (address: string, password: string) => post<RecipientLists>('/api/policy/deny/remove', { address, password });

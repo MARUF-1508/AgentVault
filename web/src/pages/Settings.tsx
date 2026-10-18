@@ -3,15 +3,20 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import {
+  addDenied,
+  addRecipient,
   addUser,
   disableTotp,
   enableTotp,
   getTotpStatus,
   getUsers,
+  removeDenied,
+  removeRecipient,
   removeUser,
   revokeOtherSessions,
   setupTotp,
   type NewAccount,
+  type RecipientLists,
   type Role,
   type UserAccount,
 } from '../api';
@@ -284,6 +289,151 @@ function Security() {
   );
 }
 
+/**
+ * Owner-only recipient lists. The policy engine reads these on every decision,
+ * so editing them is a security-relevant action: adding a known recipient or
+ * un-denying one lowers the tier that address gets, which is why the server asks
+ * for the password again on those two. The agent has no tool that can reach
+ * either list.
+ */
+function Recipients() {
+  const { can, me } = useAuth();
+  const { policy, status, refresh: onPolicyChange } = useWallet();
+  const [label, setLabel] = useState('');
+  const [address, setAddress] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [hashBefore, setHashBefore] = useState<string | null>(null);
+
+  const allowlist = policy?.recipients.allowlist ?? {};
+  const denylist = policy?.recipients.denylist ?? [];
+
+  useEffect(() => {
+    setPassword('');
+  }, [busy]);
+
+  if (!can('admin')) {
+    return (
+      <section className="card">
+        <h2>Recipients</h2>
+        <p className="muted">
+          Your role ({me?.role}) cannot change the recipient lists. An owner edits them here, or from the CLI with{' '}
+          <code>npm run cli -- recipient</code>.
+        </p>
+        <ul className="team">
+          {Object.entries(allowlist).map(([l, a]) => (
+            <li key={l}>
+              <span className="team-name">{l}</span>
+              <span className="mono muted small">{a}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
+
+  /** Runs an edit and reports the fingerprint change, which is the audit trail's visible face. */
+  const run = (fn: () => Promise<RecipientLists>, message: string) => {
+    if (busy) return;
+    setBusy(true);
+    setHashBefore(status?.policyHash ?? null);
+    fn()
+      .then((r) => {
+        toast.success(message);
+        setLabel('');
+        setAddress('');
+        return onPolicyChange();
+      })
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  const addKnown = (e: FormEvent) => {
+    e.preventDefault();
+    if (!label.trim() || !address.trim()) return;
+    run(() => addRecipient(label.trim(), address.trim(), password), `${label.trim()} is now a known recipient.`);
+  };
+
+  return (
+    <section className="card">
+      <h2 className="row">
+        <ShieldCheck size={18} aria-hidden /> Recipients
+      </h2>
+      <p className="muted small">
+        A known recipient can receive small transfers automatically. Anything not on this list is a T2 that waits for your approval. Every change is written to{' '}
+        <code>config/policy.json</code> and to the audit log.
+      </p>
+
+      <h3>Known recipients (allowlist)</h3>
+      <ul className="team">
+        {Object.entries(allowlist).map(([l, a]) => (
+          <li key={l}>
+            <span className="team-name">{l}</span>
+            <span className="mono muted small">{a}</span>
+            <button
+              className="ghost small"
+              disabled={busy}
+              title={`Stop sending automatically to ${l}`}
+              onClick={() => run(() => removeRecipient(l), `${l} removed. Sends to it now need your approval.`)}
+            >
+              <UserRoundX size={14} aria-hidden /> Remove
+            </button>
+          </li>
+        ))}
+        {!Object.keys(allowlist).length && <li className="muted small">(empty — every send needs your approval)</li>}
+      </ul>
+
+      <h3>Denied (refused outright, T3)</h3>
+      <ul className="team">
+        {denylist.map((a) => (
+          <li key={a}>
+            <span className="mono muted small">{a}</span>
+            <button
+              className="ghost small"
+              disabled={busy}
+              title="Stop refusing this address. It becomes a normal T2 or T1 recipient again."
+              onClick={() => run(() => removeDenied(a, password), `${a} is no longer denied.`)}
+            >
+              Un-deny
+            </button>
+          </li>
+        ))}
+        {!denylist.length && <li className="muted small">(empty)</li>}
+      </ul>
+
+      <form className="stack-form" onSubmit={addKnown}>
+        <h3>Add a known recipient</h3>
+        <p className="muted small">
+          This lowers the tier for that address, so confirm your password. Use the denylist above for anything you never want to send to.
+        </p>
+        <div className="row">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="label, e.g. bob" aria-label="Label" maxLength={40} required />
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="0x…" className="mono" aria-label="Address" required />
+        </div>
+        <label>
+          <span>Your password</span>
+          <input type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="Your password" required />
+        </label>
+        <div className="row">
+          <button type="submit" disabled={busy || !label.trim() || !address.trim() || !password}>
+            <UserPlus size={15} aria-hidden /> Add known recipient
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy || !address.trim()}
+            title="Refuse this address outright. Safe: it never needs your password."
+            onClick={() => run(() => addDenied(address.trim()), `${address.trim()} is now denied.`)}
+          >
+            Deny instead
+          </button>
+        </div>
+      </form>
+      {hashBefore && <p className="muted small">Policy fingerprint changed from {hashBefore}. Check it on the Security page.</p>}
+    </section>
+  );
+}
+
 export default function Settings() {
   usePageTitle('Settings');
   const { choice, setChoice } = useTheme();
@@ -363,6 +513,7 @@ export default function Settings() {
       </div>
 
       <Reveal>
+        <Recipients />
         <Team />
       </Reveal>
     </>

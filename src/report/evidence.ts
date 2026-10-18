@@ -2,6 +2,15 @@ import type { AuditEntry } from '../audit/log.js';
 
 export type ChainIntegrity = { ok: true } | { ok: false; brokenAt: number; reason: string };
 
+export interface VaultEvidence {
+  /** Optional heading, e.g. "AgentVault v2 (session keys + ERC-20)". */
+  title?: string;
+  address: string;
+  deployTx?: string;
+  txs?: { label: string; hash: string; result: 'confirmed' | 'reverted' }[];
+  explorerBase?: string;
+}
+
 export interface EvidenceOptions {
   /** Where the entries were read from (shown in the generated document). */
   auditLogPath: string;
@@ -10,12 +19,9 @@ export interface EvidenceOptions {
   /** Injectable clock for deterministic output. */
   now?: Date;
   /** Deployed vault and its externally-observed transactions (deploy + demos). */
-  vault?: {
-    address: string;
-    deployTx?: string;
-    txs?: { label: string; hash: string; result: 'confirmed' | 'reverted' }[];
-    explorerBase?: string;
-  };
+  vault?: VaultEvidence;
+  /** Extra vaults rendered after `vault` (e.g. the v2 contract, at its own address). */
+  vaults?: VaultEvidence[];
 }
 
 /**
@@ -43,11 +49,12 @@ export function renderEvidence(entries: AuditEntry[], opts: EvidenceOptions): st
 
   const now = opts.now ?? new Date();
   const integrity = opts.chainIntegrity.ok ? '✅ intact' : `❌ broken at entry ${opts.chainIntegrity.brokenAt}`;
+  const vaults = [opts.vault, ...(opts.vaults ?? [])].filter((v): v is VaultEvidence => Boolean(v));
   return `# Execution Evidence
 
 Generated ${now.toISOString()} from \`${opts.auditLogPath}\`.
 Audit chain integrity: ${integrity}
-${renderVault(opts.vault)}
+${vaults.map(renderVault).join('')}
 ## On-chain transactions (${sent.length})
 
 | Time (UTC) | Action | Amount | Tier | Result | Tx hash |
@@ -61,11 +68,10 @@ ${denied.map((e) => `- ${e.ts}: ${(e.data.reasons as string[]).join(' ')}`).join
 }
 
 /** Vault deployment and revert-demo hashes. Observed externally (explorer/RPC), not from the audit log. */
-function renderVault(vault: EvidenceOptions['vault']): string {
-  if (!vault) return '';
+function renderVault(vault: VaultEvidence): string {
   const base = (vault.explorerBase ?? '').replace(/\/$/, '');
   const link = (kind: 'address' | 'tx', hash: string) => (base ? `[${hash.slice(0, 10)}…](${base}/${kind}/${hash})` : hash);
-  const lines = ['## AgentVault (on-chain enforcement)', '', `Vault: ${link('address', vault.address)}`];
+  const lines = [`## ${vault.title ?? 'AgentVault'} (on-chain enforcement)`, '', `Vault: ${link('address', vault.address)}`];
   if (vault.deployTx) lines.push(`Deploy tx: ${link('tx', vault.deployTx)} ✅ deployed`);
   for (const t of vault.txs ?? []) {
     const mark = t.result === 'reverted' ? '❌ reverted on-chain' : '✅ confirmed';

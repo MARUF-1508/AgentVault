@@ -34,6 +34,23 @@ export function evaluate(
   if (!asset) return deny('?', 0n, `Unknown token "${'token' in intent ? intent.token : '?'}" (not in policy).`);
   const { symbol, decimals, limits } = asset;
 
+  // approve(spender, 0) is the standard way to revoke a stale allowance. It can
+  // only *shrink* what the spender is able to take, so it is always allowed
+  // (auto) even to a spender that is not on the allowlist — nothing is at risk,
+  // and refusing it would leave a dangerous standing allowance in place. It still
+  // needs the token to be in policy (checked above) and counts toward the rate
+  // limit; the denylist/lookalike checks below are about *sending* value and do
+  // not apply to a revoke.
+  if (intent.kind === 'erc20_approve' && intent.amount === '0') {
+    const spender = getAddress(intent.spender);
+    return {
+      tier: 'T1_AUTO',
+      reasons: [`Revoking the ${symbol} allowance for ${spender} (an allowance can only shrink).`],
+      amountBase: 0n,
+      asset: symbol,
+    };
+  }
+
   const unlimited = intent.kind === 'erc20_approve' && intent.amount === 'unlimited';
   let amountBase: bigint;
   try {
@@ -83,6 +100,8 @@ export function evaluate(
   }
 
   // Transfers
+  const envelope = envelopeReason(state, symbol, amountBase, fmt);
+  if (envelope) return deny(symbol, amountBase, envelope);
   if (amountBase > hardMax) {
     return deny(symbol, amountBase, `${fmt(amountBase)} exceeds the per-transaction hard cap of ${fmt(hardMax)}.`);
   }
@@ -179,6 +198,8 @@ function evaluateSwap(
   if (spent + amountBase > inBudget) {
     return deny(tokenIn.symbol, amountBase, `Daily budget exceeded: ${fmtIn(spent)} already spent today, budget is ${fmtIn(inBudget)}.`);
   }
+  const envIn = envelopeReason(state, tokenIn.symbol, amountBase, fmtIn);
+  if (envIn) return deny(tokenIn.symbol, amountBase, envIn);
 
   // Day 3: a swap also moves value; apply the portfolio anomaly guard.
   const anomaly = anomalyReason(state, policy);
@@ -263,6 +284,26 @@ function anomalyReason(state: SpendState, policy: Policy): string | undefined {
   if (amountUsd === undefined || amountUsd <= 0n) return undefined;
   if (amountUsd * 100n > portfolioUsd * BigInt(maxPct)) {
     return `Anomaly guard: one request worth ~$${formatUnits(amountUsd, 8)} is more than ${maxPct}% of the ~$${formatUnits(portfolioUsd, 8)} portfolio.`;
+  }
+  return undefined;
+}
+
+/**
+ * Per-task envelope check. Only spends are bounded (callers never set the
+ * envelope for approvals), and only when the envelope is for this asset, so an
+ * envelope on USDC never blocks an ETH transfer. Pure: the numbers come in via
+ * `SpendState.envelope`.
+ */
+function envelopeReason(
+  state: SpendState,
+  symbol: string,
+  amountBase: bigint,
+  fmt: (v: bigint) => string,
+): string | undefined {
+  const e = state.envelope;
+  if (!e || e.asset !== symbol) return undefined;
+  if (e.spentBase + amountBase > e.budgetBase) {
+    return `Task budget exceeded: ${fmt(e.spentBase)} already spent on this task, its cap is ${fmt(e.budgetBase)}.`;
   }
   return undefined;
 }

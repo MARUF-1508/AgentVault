@@ -106,6 +106,9 @@ Assume a team of 2 to 5. Tracks: **A** = agent/backend, **B** = web UI and demo,
 - [x] B: **Web UI** (Next.js or Vite + React): chat panel, live balance/portfolio card, policy and budget meter ("0.003 / 0.01 ETH today"), and an **approval card** for T2 with the reasons in plain English. Approve/Reject goes to the executor (replace `CliApprover` with a `WebApprover`).
 - [x] B: audit timeline view showing each intent → decision → tx hash with explorer link and a green "chain intact" badge.
 - [x] A: agent explains denials and proposes a compliant alternative automatically (system prompt + demo scenario 4: T3 → offers 0.005 within budget).
+- [x] B: a T2 raised from the chat opens the approval dialog by itself (shared poller in `web/src/approval.tsx`), with a top-bar **Approval needed** pill to reopen it if minimised; system prompt fixed so the agent still submits a T2 instead of telling the user to go approve it themselves (`test/prompt.test.ts`).
+- [x] B: owner-only recipient editor (Settings → Recipients) plus CLI parity (`recipient`/`deny`), with password re-confirmation on the two tier-lowering edits, poisoning refusal, atomic writes and audit logging (`src/policy/edit.ts`, `test/policy-edit.test.ts`). Replaces unaudited hand-editing of `config/policy.json`.
+- [x] B: typing an address that is not a known recipient into the Agent page offers the Transfer page (prefilled) instead of spending an LLM round trip (`web/src/unlisted.ts`, `test/unlisted.test.ts`).
 
 ### Day 5 (Sat 17 Oct): challenge bonus
 - [x] C: routed agent payments through `AgentVault` (executor mode `VAULT=true`, commit `d301a07`); live zero-value `agentSend` proof in the evidence file. Compromise simulation captured: over-limit and non-allowlisted direct calls revert on-chain (two reverted hashes).
@@ -124,6 +127,21 @@ Assume a team of 2 to 5. Tracks: **A** = agent/backend, **B** = web UI and demo,
 
 ### Day 8 (Tue 20 Oct): submit early
 - [ ] Submit by **12:00 UTC**, four hours before the 16:00 UTC cutoff. Resubmit later if something improves.
+
+### Post-freeze additions (18 Oct, after the Day 6 freeze)
+
+The freeze rule is about the *deployed* contract and evidence hashes, so the
+v1 address and every hash in `docs/EXECUTION_EVIDENCE.md` stay exactly as they
+were. Everything below is additive and tested; the v2 contract is a new file at a
+new address.
+
+- [x] C: `contracts/AgentVaultV2.sol` — delegated **session keys** (owner-granted, expiring, capped below the vault's) plus ERC-20 (`agentSendToken`). `agentSend` keeps v1's exact signature, so the executor needs no change to route through either vault. 37 Foundry tests, 4 fuzz. Deploy script `script/DeployAgentVaultV2.s.sol`.
+- [x] A: `VAULT_TOKENS=true` routes ERC-20 transfers through `agentSendToken`, closing R16 (token transfers under on-chain caps). `docs/EXECUTION_EVIDENCE.md` renders both vaults.
+- [x] A: core fixes from the security review: concurrent-budget reservation ledger (no overdraft), a failed portfolio read no longer aborts a transfer, TOTP changes revoke other sessions, `/api/transact` refuses swaps (they must go through `execute_swap`), stale docs/comments corrected, and a `ROUTES` coverage test.
+- [x] A: **x402 v2 conformance** — accepts both v1 (`maxAmountRequired`) and v2 (`amount`, CAIP-2) payment-required bodies, picks the offer on our chain, sends a base64 v2 `PaymentPayload` as proof, and treats `settlement_pending` as non-terminal so a broadcast payment is never retried (no double charge).
+- [x] A: **task budget envelope** — a goal's own spend cap (`--task` / `--task-max`), summed from audit entries tagged with the task and enforced by the pure engine on transfers and swaps; a reverted tx still counts.
+- [x] A: **stale-allowance cleanup** — `approve(spender, 0)` (CLI `revoke`) is always allowed (it can only shrink an allowance) even for a non-allowlisted spender.
+- [x] A: **counterfactual what-if** — `whatif` CLI and the read-only `what_if` tool evaluate the same intent under a hypothesis (allowlisted recipient, different limits, already spent, paused) without signing or mutating anything.
 
 ---
 

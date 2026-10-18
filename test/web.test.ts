@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,11 +24,19 @@ const policy = PolicySchema.parse({
   rateLimit: { maxTxPerHour: 5 },
 });
 
+/** The recipient routes write to POLICY_FILE, so tests get a throwaway copy. */
+const policyDir = mkdtempSync(join(tmpdir(), 'aw-policy-'));
+const policyFile = join(policyDir, 'policy.json');
+writeFileSync(policyFile, `${JSON.stringify(policy, null, 2)}\n`);
+// File scope, not per-describe: the hardening block starts a second server later
+// and still needs the policy file to exist for the fingerprint to be readable.
+afterAll(() => rmSync(policyDir, { recursive: true, force: true }));
+
 const env = {
   CHAIN: 'base-sepolia',
   LLM_BASE_URL: 'https://api.openai.com/v1',
   LLM_MODEL: 'gpt-4o-mini',
-  POLICY_FILE: 'config/policy.json',
+  POLICY_FILE: policyFile,
   AUDIT_LOG: 'data/audit.jsonl',
   PAUSE_FILE: join(mkdtempSync(join(tmpdir(), 'aw-web-')), 'PAUSED'),
   ALLOW_MAINNET: 'false',
@@ -57,7 +65,14 @@ function stubCtx(executor: Partial<Executor>): { ctx: ToolContext; approver: Web
 
 const dir = mkdtempSync(join(tmpdir(), 'aw-users-'));
 const users = new UserStore(join(dir, 'users.json'));
-const PASSWORDS = { owner: users.add('olivia', 'owner'), operator: users.add('oscar', 'operator'), viewer: users.add('vera', 'viewer') };
+const PASSWORDS = {
+  owner: users.add('olivia', 'owner'),
+  operator: users.add('oscar', 'operator'),
+  // A second operator: the throttle test above deliberately locks 'oscar' out
+  // for 15 minutes, so later role checks need their own account.
+  spareOperator: users.add('olga', 'operator'),
+  viewer: users.add('vera', 'viewer'),
+};
 
 /** Signs in and returns the session cookie. */
 async function login(base: string, username: string, password: string): Promise<string> {
@@ -248,6 +263,17 @@ describe('web server', () => {
     expect(badJson.status).toBe(400);
   });
 
+  it('refuses a swap on /api/transact but still previews it', async () => {
+    // A swap must go through execute_swap so its bounded approval is sent first;
+    // accepting it on the generic transact route would bypass that orchestration.
+    const swap = { kind: 'swap', tokenIn: 'WETH', tokenOut: 'USDC', amountIn: '1', slippageBps: 50 };
+    const transact = await postJson('/api/transact', { intent: swap });
+    expect(transact.status).toBe(400);
+    expect(await transact.json()).toMatchObject({ error: 'Invalid intent' });
+    // Preview stays read-only, so it may still show the tier for a swap.
+    expect((await postJson('/api/preview', { intent: swap })).status).toBe(200);
+  });
+
   it('parks a T2 transact until the UI rejects, and nothing is sent', async () => {
     const tx = authed(`${base}/api/transact`, {
       method: 'POST',
@@ -274,6 +300,63 @@ describe('web server', () => {
     expect(appends).toContainEqual({ type: 'access', data: { event: 'decide', user: 'olivia', approved: false } });
     await expect(tx).resolves.toMatchObject({ status: 'rejected_by_human' });
     expect(await (await authed(`${base}/api/pending`)).json()).toEqual({ pending: null, expiresAt: null });
+  });
+
+  // Recipient lists. Escalating directions (add a known recipient, un-deny one)
+  // lower the tier an address gets, so they need the owner's password again.
+  const post = (path: string, body: unknown, jar = cookie) =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: jar },
+      body: JSON.stringify(body),
+    });
+
+  it('adds a known recipient once the owner re-confirms their password', async () => {
+    const r = await post('/api/policy/recipients/add', { label: 'bob', address: '0x2222222222222222222222222222222222222222', password: PASSWORDS.owner });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { policyHash: string; allowlist: Record<string, string> };
+    expect(body.allowlist.bob).toBe('0x2222222222222222222222222222222222222222');
+    // The fingerprint moved, so the UI cannot keep showing a stale policy hash.
+    expect(body.policyHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(appends).toContainEqual(
+      expect.objectContaining({ type: 'access', data: expect.objectContaining({ event: 'recipient_added', by: 'olivia', escalated: true }) }),
+    );
+    // Live: the running server now treats bob as a known recipient.
+    expect(Object.keys(policy.recipients.allowlist)).toContain('bob');
+  });
+
+  it('refuses the escalating directions without a password, and with the wrong one', async () => {
+    const noPassword = await post('/api/policy/recipients/add', { label: 'eve', address: '0x3333333333333333333333333333333333333333' });
+    expect(noPassword.status).toBe(403);
+    expect(await (await post('/api/policy/recipients/add', { label: 'eve', address: '0x3333333333333333333333333333333333333333', password: 'wrong' })).status).toBe(401);
+    expect(Object.keys(policy.recipients.allowlist)).not.toContain('eve');
+    expect(await (await post('/api/policy/deny/remove', { address: '0x1111111111111111111111111111111111111111' })).status).toBe(403);
+  });
+
+  it('allows the fail-safe directions on the session alone', async () => {
+    const deny = await post('/api/policy/deny/add', { address: '0x4444444444444444444444444444444444444444' });
+    expect(deny.status).toBe(200);
+    expect(policy.recipients.denylist).toContain('0x4444444444444444444444444444444444444444');
+    const remove = await post('/api/policy/recipients/remove', { label: 'bob' });
+    expect(remove.status).toBe(200);
+    expect(Object.keys(policy.recipients.allowlist)).not.toContain('bob');
+  });
+
+  it('keeps the recipient routes away from non-owners', async () => {
+    const opCookie = await login(base, 'olga', PASSWORDS.spareOperator);
+    expect((await post('/api/policy/deny/add', { address: '0x5555555555555555555555555555555555555555' }, opCookie)).status).toBe(403);
+    expect(policy.recipients.denylist).not.toContain('0x5555555555555555555555555555555555555555');
+  });
+
+  it('rejects an address-poisoning lookalike and reports why', async () => {
+    const carol = '0x6666666666666666666666666666666666666666';
+    expect((await post('/api/policy/recipients/add', { label: 'carol', address: carol, password: PASSWORDS.owner })).status).toBe(200);
+    // Same first 4 and last 4 hex characters as carol, different middle.
+    const lookalike = `0x6666${'0'.repeat(32)}6666`;
+    const r = await post('/api/policy/recipients/add', { label: 'evil', address: lookalike, password: PASSWORDS.owner });
+    expect(r.status).toBe(400);
+    expect((await r.json() as { error: string }).error).toMatch(/poisoning/i);
+    expect(Object.keys(policy.recipients.allowlist)).not.toContain('evil');
   });
 
   it('refuses chat without an LLM key instead of calling the network', async () => {
@@ -427,5 +510,41 @@ describe('hardening headers, policy hash and CSV export', () => {
       const r = await fetch(`${base}${path}`, { method: path === '/api/auth/totp' ? 'GET' : 'POST', headers: { 'content-type': 'application/json' }, body: path === '/api/auth/totp' ? undefined : '{}' });
       expect(r.status).toBe(401);
     }
+  });
+
+  it('revokes a user\'s other sessions when 2FA is enabled or disabled', async () => {
+    const pw = users2.add('uma', 'owner');
+    const post = (path: string, body: unknown, jar: string) =>
+      fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { cookie: jar, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const loginCode = async (code: string) => {
+      const r = await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'uma', password: pw, code }),
+      });
+      expect(r.status).toBe(200);
+      return (r.headers.get('set-cookie') ?? '').split(';')[0]!;
+    };
+    const alive = (jar: string) => fetch(`${base}/api/auth/me`, { headers: { cookie: jar } }).then((r) => r.status);
+
+    const first = await login(base, 'uma', pw);
+    const other = await login(base, 'uma', pw);
+    const setup = (await (await post('/api/auth/totp/setup', {}, first)).json()) as { secret: string };
+
+    // Enabling keeps the session that did it and ends every other one.
+    expect((await post('/api/auth/totp/enable', { code: totp(setup.secret) }, first)).status).toBe(200);
+    expect(await alive(other)).toBe(401);
+    expect(await alive(first)).toBe(200);
+
+    // Disabling is the same: the acting session survives, the rest do not.
+    const acting = await loginCode(totp(setup.secret));
+    const third = await loginCode(totp(setup.secret));
+    expect((await post('/api/auth/totp/disable', { password: pw }, acting)).status).toBe(200);
+    expect(await alive(third)).toBe(401);
+    expect(await alive(acting)).toBe(200);
   });
 });

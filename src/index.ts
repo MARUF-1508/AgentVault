@@ -13,6 +13,7 @@ import { makeClients } from './chain/client.js';
 import { loadEnv, loadPolicy } from './config.js';
 import { Executor } from './executor/executor.js';
 import { tokenInfo } from './policy/engine.js';
+import { addDenied, addRecipient, removeDenied, removeRecipient, writePolicyAtomic } from './policy/edit.js';
 import { pauseWallet, resumeWallet } from './policy/killswitch.js';
 import { IntentSchema, type Intent } from './policy/types.js';
 import { loadSchedules, type Schedules } from './schedule/rules.js';
@@ -24,10 +25,14 @@ const USAGE = `Agent Wallet
   npm run cli -- info                              wallet address, chain, balance
   npm run cli -- portfolio                         balances with USD value
   npm run cli -- balance <TOKEN>                   token balance (e.g. USDC)
-  npm run cli -- send <to> <amount> [TOKEN] [--dry-run]
+  npm run cli -- send <to> <amount> [TOKEN] [--task <id> --task-max <amount>] [--dry-run]
+                                                   --task caps the total a goal may spend (envelope)
   npm run cli -- approve <TOKEN> <spender> <amount|unlimited> [--dry-run]
+  npm run cli -- revoke <TOKEN> <spender> [--dry-run]   set a stale allowance back to 0 (always allowed)
   npm run cli -- swap <tokenIn> <tokenOut> <amountIn> [slippageBps] [--dry-run]
   npm run cli -- preview <to> <amount> [TOKEN]     policy tier only, nothing sent
+  npm run cli -- whatif <to> <amount> [TOKEN] [--allow] [--auto N] [--hard N] [--daily N] [--paused]
+                                                   read-only: "what would happen if ...?"
   npm run cli -- schedule [list|run]               scheduled / conditional rules
   npm run cli -- x402 [url]                        fetch a paid (x402-style) API resource; the wallet pays if it gets a 402
   npm run cli -- pause | resume                    kill switch
@@ -35,6 +40,10 @@ const USAGE = `Agent Wallet
   npm run cli -- serve [--port N]                  web UI (loopback only, sign-in required)
   npm run cli -- user add <name> <owner|operator|viewer>   create a web-UI account (prints its password)
   npm run cli -- user list | remove <name>         manage web-UI accounts
+  npm run cli -- recipient list                   allowlist + denylist
+  npm run cli -- recipient add <label> <address>  add a known recipient (audited)
+  npm run cli -- recipient remove <label>
+  npm run cli -- deny add <address> | deny remove <address>
   npm run agent                                    chat with the AI agent
 `;
 
@@ -56,6 +65,7 @@ async function main() {
     return void console.log('Wallet resumed.');
   }
   if (cmd === 'user' || cmd === 'users') return userCommand(new UserStore(env.USERS_FILE), rest);
+  if (cmd === 'recipient' || cmd === 'deny') return recipientCommand(env, policy, audit, [cmd, ...rest]);
   if (cmd === 'audit') {
     if (rest[0] === 'verify') {
       const v = audit.verify();
@@ -93,7 +103,20 @@ async function main() {
   const schedules = readSchedules(env.SCHEDULES_FILE);
   const ctx: ToolContext = { clients, policy, executor, audit, schedules, x402ApiUrl: env.X402_API_URL };
   const dryRun = rest.includes('--dry-run');
-  const args = rest.filter((a) => a !== '--dry-run');
+  const taskIdx = rest.indexOf('--task');
+  const taskMaxIdx = rest.indexOf('--task-max');
+  const task = taskIdx >= 0 ? rest[taskIdx + 1] : undefined;
+  const taskMax = taskMaxIdx >= 0 ? rest[taskMaxIdx + 1] : undefined;
+  const args: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
+    if (a === '--dry-run') continue;
+    if (a === '--task' || a === '--task-max') {
+      i++;
+      continue;
+    }
+    args.push(a);
+  }
 
   switch (cmd) {
     case 'info':
@@ -107,12 +130,20 @@ async function main() {
       const [to, amount, token] = args;
       const intent = parseIntent(token ? { kind: 'erc20_transfer', to, amount, token } : { kind: 'native_transfer', to, amount });
       if (cmd === 'preview') return print(await executor.preview(intent));
-      return print(await executor.execute(intent, { dryRun }));
+      return print(await executor.execute(intent, { dryRun, task, taskMax }));
     }
     case 'approve': {
       const [token, spender, amount] = args;
       return print(await executor.execute(parseIntent({ kind: 'erc20_approve', token, spender, amount }), { dryRun }));
     }
+    case 'revoke': {
+      // approve(spender, 0): clean up a stale allowance. The engine always allows
+      // this (it can only shrink what the spender may take).
+      const [token, spender] = args;
+      return print(await executor.execute(parseIntent({ kind: 'erc20_approve', token, spender, amount: '0' }), { dryRun }));
+    }
+    case 'whatif':
+      return cmdWhatIf(args, ctx);
     case 'swap':
       return cmdSwap(args, dryRun, ctx);
     case 'schedule':
@@ -146,6 +177,63 @@ function userCommand(users: UserStore, args: string[]): void {
   process.exitCode = 1;
 }
 
+/**
+ * Recipient-list edits from the terminal. Same pure helpers and the same atomic
+ * write as the web routes, so both paths behave identically; a local shell is
+ * already the owner, so there is no password prompt, but every change is still
+ * written to the audit log.
+ */
+function recipientCommand(env: ReturnType<typeof loadEnv>, policy: ReturnType<typeof loadPolicy>, audit: AuditLog, args: string[]): void {
+  const [group, sub, a, b] = args;
+  const wantsList = group === 'list' || !group || (group !== 'deny' && sub === 'list');
+  if (wantsList) {
+    const { allowlist, denylist } = policy.recipients;
+    const labels = Object.keys(allowlist);
+    const width = Math.max(4, ...labels.map((l) => l.length)) + 2;
+    console.log('Allowlist (known recipients; can receive automatic T1 transfers):');
+    for (const [label, address] of Object.entries(allowlist)) console.log(`  ${label.padEnd(width)}${address}`);
+    if (!labels.length) console.log('  (empty)');
+    console.log('Denylist (refused outright, T3):');
+    for (const address of denylist) console.log(`  ${' '.repeat(width)}${address}`);
+    if (!denylist.length) console.log('  (empty)');
+    return;
+  }
+  const save = (event: string, detail: Record<string, unknown>, next: ReturnType<typeof addRecipient>) => {
+    writePolicyAtomic(env.POLICY_FILE, next);
+    audit.append('access', { event, by: 'cli', ...detail });
+    console.log(`Saved. ${event.replace(/_/g, ' ')}. Restart the UI server to pick it up.`);
+  };
+  try {
+    if (group === 'recipient' && sub === 'add' && a && b) {
+      const next = addRecipient(policy, a, b);
+      save('recipient_added', { label: a, address: b, escalated: true }, next);
+      return;
+    }
+    if (group === 'recipient' && sub === 'remove' && a) {
+      const next = removeRecipient(policy, a);
+      save('recipient_removed', { label: a }, next);
+      return;
+    }
+    if (group === 'deny' && sub === 'add' && a) {
+      const next = addDenied(policy, a);
+      save('deny_added', { address: a }, next);
+      return;
+    }
+    if (group === 'deny' && sub === 'remove' && a) {
+      const next = removeDenied(policy, a);
+      save('deny_removed', { address: a, escalated: true }, next);
+      return;
+    }
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+    return;
+  }
+  console.error('Usage: recipient list | recipient add <label> <address> | recipient remove <label>');
+  console.error('       deny add <address> | deny remove <address>');
+  process.exitCode = 1;
+}
+
 /** Reads schedules.json if present; a missing file just means no rules. */
 function readSchedules(path: string): Schedules {
   return existsSync(path) ? loadSchedules(path) : { version: 1, rules: [] };
@@ -153,15 +241,17 @@ function readSchedules(path: string): Schedules {
 
 /**
  * Vault-routing mode (VAULT=true): native transfers go through agentSend on the
- * deployed vault, so on-chain caps apply. Fail closed when the address is missing.
+ * deployed vault, so on-chain caps apply. With VAULT_TOKENS=true the vault is an
+ * AgentVaultV2 and ERC-20 transfers go through agentSendToken too. Fail closed
+ * when the address is missing.
  */
-function vaultConfig(env: ReturnType<typeof loadEnv>): { address: `0x${string}` } | undefined {
+function vaultConfig(env: ReturnType<typeof loadEnv>): { address: `0x${string}`; tokens?: boolean } | undefined {
   if (env.VAULT !== 'true') return undefined;
   if (!env.VAULT_ADDRESS) {
     console.error('VAULT=true but VAULT_ADDRESS is not set. Set it in .env or unset VAULT.');
     process.exit(1);
   }
-  return { address: env.VAULT_ADDRESS as `0x${string}` };
+  return { address: env.VAULT_ADDRESS as `0x${string}`, ...(env.VAULT_TOKENS === 'true' ? { tokens: true } : {}) };
 }
 
 /**
@@ -212,6 +302,41 @@ async function cmdSwap(args: string[], dryRun: boolean, ctx: ToolContext) {
   const r = await ctx.executor.execute(intent, { dryRun });
   steps.push({ step: 'swap', status: r.status, tier: r.decision.tier, reasons: r.decision.reasons, txHash: r.txHash, explorerUrl: r.explorerUrl, error: r.error });
   return print({ steps });
+}
+
+/**
+ * `whatif <to> <amount> [TOKEN] [--allow] [--auto N] [--hard N] [--daily N] [--paused]`.
+ * Read-only: prints the verdict as things stand beside the verdict under the
+ * hypothesis. `--allow` says "if this recipient were already known", `--auto` /
+ * `--hard` / `--daily` override the per-transaction limits for this asset.
+ */
+async function cmdWhatIf(args: string[], ctx: ToolContext) {
+  const withValue = new Set(['--auto', '--hard', '--daily']);
+  const bools = new Set(['--allow', '--paused']);
+  const flags: Record<string, string | true> = {};
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (withValue.has(a)) flags[a] = args[++i] ?? '';
+    else if (bools.has(a)) flags[a] = true;
+    else positional.push(a);
+  }
+  const [to, amount, token] = positional;
+  if (!to || !amount) {
+    console.error(`Usage: whatif <to> <amount> [TOKEN] [--allow] [--auto N] [--hard N] [--daily N] [--paused]\n\n${USAGE}`);
+    process.exit(1);
+  }
+  const intent = parseIntent(token ? { kind: 'erc20_transfer', to, amount, token } : { kind: 'native_transfer', to, amount });
+  const limits: { autoMaxPerTx?: string; hardMaxPerTx?: string; dailyBudget?: string } = {};
+  if (typeof flags['--auto'] === 'string') limits.autoMaxPerTx = flags['--auto'];
+  if (typeof flags['--hard'] === 'string') limits.hardMaxPerTx = flags['--hard'];
+  if (typeof flags['--daily'] === 'string') limits.dailyBudget = flags['--daily'];
+  const result = await ctx.executor.whatIf(intent, {
+    ...(flags['--allow'] ? { allowRecipients: [to as `0x${string}`] } : {}),
+    ...(flags['--paused'] ? { paused: true } : {}),
+    ...(Object.keys(limits).length > 0 ? { limits } : {}),
+  });
+  return print(result);
 }
 
 async function chat(env: ReturnType<typeof loadEnv>, ctx: ToolContext) {

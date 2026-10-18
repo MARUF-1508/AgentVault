@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { getAddress, isAddress } from 'viem';
 
-const Address = z
+/** A 0x address, normalised to its checksummed form. Exported so edits and tests reuse it. */
+export const Address = z
   .string()
   .refine((s) => isAddress(s, { strict: false }), 'not a valid address')
   .transform((s) => getAddress(s));
@@ -176,6 +177,14 @@ export interface SpendState {
   paused: boolean;
   /** Optional Day 3 risk findings; missing means those checks stay off. */
   risk?: RiskInput;
+  /**
+   * Optional per-task spending envelope. When present, the engine refuses any
+   * *spend* on this asset that would push the task's cumulative amount past its
+   * cap (approvals do not consume it — only the transfer they enable does). The
+   * executor derives the numbers from audit entries tagged with the same task,
+   * so the cap follows the task even across separate executions.
+   */
+  envelope?: { asset: string; budgetBase: bigint; spentBase: bigint };
 }
 
 /**

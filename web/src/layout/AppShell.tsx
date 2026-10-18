@@ -1,9 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, LogOut, Menu, Moon, OctagonPause, Search, Sun, X } from 'lucide-react';
+import { ChevronDown, LogOut, Menu, Moon, OctagonPause, Search, ShieldAlert, Sun, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation, useOutlet } from 'react-router-dom';
 import { toast } from 'sonner';
 import { pause } from '../api';
+import { ApprovalProvider, useApproval } from '../approval';
 import { useAuth } from '../auth';
 import ApprovalModal from '../components/ApprovalModal';
 import CommandPalette from '../components/CommandPalette';
@@ -132,7 +133,24 @@ function PauseControl() {
   );
 }
 
-export default function AppShell() {
+/**
+ * Manual route into a waiting T2. The dialog opens by itself when a request
+ * arrives; this is for the owner who minimised it or was on another tab.
+ */
+function ApprovalPill() {
+  const { summary, open, show } = useApproval();
+  const { can } = useAuth();
+  if (!summary || !can('approve')) return null;
+  return (
+    <button className={`pill pill-warn approval-pill ${open ? '' : 'pulsing'}`} onClick={show} title="A transaction is waiting for your approval">
+      <ShieldAlert size={15} aria-hidden />
+      <span className="hide-sm">Approval needed</span>
+      <span className="sr-only">Open the pending approval</span>
+    </button>
+  );
+}
+
+function Shell() {
   const { resolved, toggle } = useTheme();
   const { status } = useWallet();
   const location = useLocation();
@@ -209,6 +227,7 @@ export default function AppShell() {
             )}
           </div>
           <div className="row topbar-actions">
+            <ApprovalPill />
             <button className="ghost palette-btn" aria-label="Search and commands (Ctrl+K)" title="Search and commands (Ctrl+K)" onClick={() => setPalette(true)}>
               <Search size={15} aria-hidden />
               <span className="hide-sm">Search</span>
@@ -258,5 +277,14 @@ export default function AppShell() {
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <ApprovalModal />
     </div>
+  );
+}
+
+/** The pending-approval slot is shared by the dialog and the topbar pill. */
+export default function AppShell() {
+  return (
+    <ApprovalProvider>
+      <Shell />
+    </ApprovalProvider>
   );
 }

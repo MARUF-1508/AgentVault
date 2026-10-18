@@ -8,20 +8,27 @@ import { linkify, TierBadge } from '../format';
 
 const CUSTOM = '__custom__';
 
+export interface PolicyCheckProps {
+  /** Prefilled when the Agent page hands a new recipient over for review. */
+  initialTo?: string;
+  initialAmount?: string;
+  initialAsset?: string;
+}
+
 /**
  * Direct path to the executor without the LLM: check a transfer's tier, then
  * optionally submit it. Submitting goes through the same policy, simulation and
  * T2 approval as the agent does.
  */
-export default function PolicyCheck() {
+export default function PolicyCheck({ initialTo, initialAmount, initialAsset }: PolicyCheckProps = {}) {
   const { policy, status, refresh: onActivity } = useWallet();
   const { can } = useAuth();
   const labels = Object.keys(policy?.recipients.allowlist ?? {});
   const assets = policy ? [policy.native.symbol, ...Object.keys(policy.tokens)] : [];
-  const [asset, setAsset] = useState('');
-  const [recipient, setRecipient] = useState('');
-  const [custom, setCustom] = useState('');
-  const [amount, setAmount] = useState('0.0002');
+  const [asset, setAsset] = useState(initialAsset ?? '');
+  const [recipient, setRecipient] = useState(initialTo ? CUSTOM : '');
+  const [custom, setCustom] = useState(initialTo ?? '');
+  const [amount, setAmount] = useState(initialAmount ?? '0.0002');
   const [verdict, setVerdict] = useState<{ tier: Tier; reasons: string[] } | null>(null);
   const [result, setResult] = useState<TransactResult | null>(null);
   const [error, setError] = useState('');

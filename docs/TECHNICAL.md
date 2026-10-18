@@ -98,14 +98,24 @@ per-recipient judgement. The first matching rule wins; evaluation is total
 10. **Daily budget** — `spentToday + amount > dailyBudget` → T3. Spend is
     derived from `tx_sent` entries, and broadcast-but-failed txs still count,
     so retries cannot drain past the budget.
-11. **Anomaly guard** — single request over `risk.maxActionPctOfPortfolio`% of
+11. **Task envelope** — when the caller attaches a per-task cap
+    (`--task` / `--task-max`), the executor sums that task's prior sends (audit
+    entries tagged with the same task and asset) and the engine refuses a
+    transfer or swap that would cross it. It is independent of the daily budget,
+    and broadcast-but-failed sends still count.
+12. **Anomaly guard** — single request over `risk.maxActionPctOfPortfolio`% of
     portfolio USD value → T3.
-12. **Address risk** (computed before `evaluate`, passed in as data so the
+13. **Address risk** (computed before `evaluate`, passed in as data so the
     engine stays pure) — blocklisted → T3; lookalike of an allowlisted address
     (address poisoning) → T3 with the impersonated address named;
     contract recipient → raised to at least T2 (configurable).
-13. **Recipient + auto limit** — unknown recipient or amount over
+14. **Recipient + auto limit** — unknown recipient or amount over
     `autoMaxPerTx` → T2 with reasons; otherwise T1.
+
+An `erc20_approve` with amount `0` (a stale-allowance revoke) short-circuits to
+T1 before the denylist/risk checks: it can only shrink what a spender may take,
+so it is safe even for a spender that is not on the allowlist. Approvals never
+consume a task envelope — only the transfer they enable does.
 
 Risk findings can only **raise** a tier, never lower one.
 
@@ -123,6 +133,36 @@ logged; (2) the swap with the engine-derived minimum output — again through
 triggers). `schedule run` evaluates them; a due rule becomes a normal `Intent`
 executed through the same pipeline (dry-run supported). The LLM has no tool
 that writes schedules.
+
+### On-chain vault (v1 and v2)
+
+`contracts/AgentVault.sol` (v1, deployed) moves native ETH for an allowlisted
+agent under a per-tx cap, a daily limit and a recipient allowlist, so a stolen
+key cannot exceed them. `contracts/AgentVaultV2.sol` (new file, own address)
+keeps the identical `agentSend(address,uint256)` signature — so the executor's
+`buildTx` routes through either with no change — and adds **delegated session
+keys** (owner-granted, expiring, capped below the vault's own caps, revocable)
+plus ERC-20 via `agentSendToken`. A session's caps are re-checked against the
+vault's on every send, so lowering a vault limit immediately tightens every live
+session. See `docs/VAULT_V2.md`.
+
+### Paid data (x402 v2)
+
+`src/x402.ts` fetches the configured paid API. On `402 Payment Required` it
+validates the body (accepting v1 and v2 shapes), selects the offer on our chain
+by CAIP-2 network id, and pays with a normal `native_transfer` through the
+executor. Proof is a base64 v2 `PaymentPayload` in the `X-PAYMENT` header. A
+`settlement_pending` answer is non-terminal: the broadcast hash is preserved and
+the request is never retried, because re-paying a broadcast payment is a double
+charge.
+
+### Counterfactual "what-if"
+
+`src/policy/whatif.ts` runs `evaluate` twice — once as things are, once under a
+hypothesis (a recipient treated as allowlisted, different limits, extra spend
+already committed, paused) — and returns both decisions plus a one-line summary.
+It is pure and only reads: it never signs and never mutates the policy, so it is
+safe as the read-only `what_if` agent tool and the `whatif` CLI command.
 
 ## 3. Security design
 

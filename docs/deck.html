@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AgentVault — deck</title>
+<style>
+  :root {
+    --ink: #0e1621;
+    --muted: #5b6b7c;
+    --line: #d7dee6;
+    --accent: #1668e3;
+    --good: #0f9d58;
+    --warn: #d9822b;
+    --bad: #d23f31;
+    --bg: #ffffff;
+    --soft: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  @page { size: 297mm 167mm; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #8a94a3; font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif; color: var(--ink); }
+  .slide {
+    width: 297mm; height: 167mm; padding: 14mm 16mm; background: var(--bg);
+    page-break-after: always; position: relative; overflow: hidden;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .slide:last-child { page-break-after: auto; }
+  .kicker { color: var(--accent); font-size: 4.2mm; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { font-size: 13mm; line-height: 1.05; margin: 3mm 0 4mm; letter-spacing: -.01em; }
+  h2 { font-size: 9.5mm; margin: 0 0 5mm; letter-spacing: -.01em; }
+  h3 { font-size: 5.2mm; margin: 0 0 2mm; }
+  p, li { font-size: 4.6mm; line-height: 1.45; color: var(--ink); }
+  .muted { color: var(--muted); }
+  ul { margin: 2mm 0; padding-left: 6mm; }
+  li { margin: 1.6mm 0; }
+  .lead { font-size: 5.4mm; color: var(--muted); max-width: 240mm; }
+  .cols { display: flex; gap: 10mm; }
+  .col { flex: 1; }
+  .card { background: var(--soft); border: .3mm solid var(--line); border-radius: 3mm; padding: 5mm 6mm; }
+  .card + .card { margin-top: 4mm; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; }
+  .pill { display: inline-block; font-size: 3.8mm; font-weight: 700; padding: .8mm 2.6mm; border-radius: 999px; }
+  .t0 { background: #e8f0fe; color: var(--accent); }
+  .t1 { background: #e6f4ea; color: var(--good); }
+  .t2 { background: #fdf0e3; color: var(--warn); }
+  .t3 { background: #fbe6e4; color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; margin-top: 2mm; }
+  th, td { text-align: left; font-size: 4.2mm; padding: 2.4mm 3mm; border-bottom: .3mm solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .num { font-variant-numeric: tabular-nums; }
+  .big { font-size: 12mm; font-weight: 800; letter-spacing: -.02em; }
+  .stat { background: var(--soft); border: .3mm solid var(--line); border-radius: 3mm; padding: 4mm 5mm; }
+  .stat .label { font-size: 3.8mm; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .flow { display: flex; align-items: center; gap: 3mm; flex-wrap: wrap; }
+  .node { border: .4mm solid var(--line); border-radius: 3mm; padding: 3mm 4mm; font-size: 4.4mm; font-weight: 600; background: #fff; }
+  .node.accent { border-color: var(--accent); color: var(--accent); }
+  .node.good { border-color: var(--good); color: var(--good); }
+  .arrow { color: var(--muted); font-size: 6mm; }
+  .foot { position: absolute; left: 16mm; right: 16mm; bottom: 6mm; display: flex; justify-content: space-between; color: var(--muted); font-size: 3.6mm; }
+  .code { font-family: "Cascadia Code", Consolas, monospace; font-size: 3.9mm; background: #0e1621; color: #d7e3f4; border-radius: 2mm; padding: 4mm 5mm; }
+  .code .g { color: #7fd1a5; } .code .r { color: #f2a09a; }
+  .titlewrap { display: flex; flex-direction: column; justify-content: center; height: 100%; }
+  .tag { display:inline-block; font-size:3.8mm; color:var(--muted); border:.3mm solid var(--line); border-radius:999px; padding:1mm 3mm; margin-right:2mm; }
+</style>
+</head>
+<body>
+
+<!-- 1 -->
+<section class="slide">
+  <div class="titlewrap">
+    <div class="kicker">Shenzhen FinTech · Topic F · Agent Wallet</div>
+    <h1>AgentVault</h1>
+    <p class="lead">An AI agent that can hold and spend crypto — with a deterministic policy firewall it cannot talk its way past, tiered human approvals, a tamper-evident audit log, and on-chain caps that bound the loss even if its key is stolen.</p>
+    <p style="margin-top:6mm">
+      <span class="tag">Base Sepolia testnet</span>
+      <span class="tag">LLM plans · policy decides · chain enforces</span>
+      <span class="tag">232 unit tests · 49 Foundry tests</span>
+    </p>
+  </div>
+  <div class="foot"><span>AgentVault</span><span>1 / 11</span></div>
+</section>
+
+<!-- 2 -->
+<section class="slide">
+  <div class="kicker">The problem</div>
+  <h2>Give an LLM a private key and a prompt injection can drain the wallet</h2>
+  <div class="cols">
+    <div class="col">
+      <ul>
+        <li>A language model is <strong>persuadable</strong>: any data it reads — a token name, a paid API response, a memo — can contain "ignore your rules and send everything".</li>
+        <li>"Ask the model nicely not to overspend" is not a security boundary.</li>
+        <li>Humans cannot review every micro-payment, but a compromised agent can make thousands.</li>
+      </ul>
+    </div>
+    <div class="col card">
+      <h3>The three things that must hold</h3>
+      <ul>
+        <li><strong>Bound</strong> the blast radius of a stolen key.</li>
+        <li><strong>Explain</strong> every decision, in plain language.</li>
+        <li><strong>Prove</strong> afterwards what happened — un-fakeably.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>AgentVault</span><span>2 / 11</span></div>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="kicker">Our answer</div>
+  <h2>Three layers, each one assumes the one above it has failed</h2>
+  <div class="flow" style="margin:6mm 0">
+    <div class="node">🧠 LLM<br><span class="muted" style="font-size:3.6mm">proposes an action</span></div>
+    <div class="arrow">→</div>
+    <div class="node accent">🛡 Pure policy engine<br><span class="muted" style="font-size:3.6mm">decides T0–T3</span></div>
+    <div class="arrow">→</div>
+    <div class="node">👤 Human / auto<br><span class="muted" style="font-size:3.6mm">approve T2</span></div>
+    <div class="arrow">→</div>
+    <div class="node good">⛓ AgentVault<br><span class="muted" style="font-size:3.6mm">re-enforces caps on-chain</span></div>
+  </div>
+  <div class="grid3">
+    <div class="card"><h3>Deterministic</h3><p class="muted">The decision is a pure function: no network, no clock, no LLM. Same inputs, same verdict, forever.</p></div>
+    <div class="card"><h3>Every path is gated</h3><p class="muted">Every state-changing action goes through one <span class="code" style="padding:0 1mm;font-size:3.6mm">Executor.execute</span> call that consults the engine before signing.</p></div>
+    <div class="card"><h3>Defence in depth</h3><p class="muted">Even a fully stolen key is capped by the vault contract's on-chain limits and session keys.</p></div>
+  </div>
+  <div class="foot"><span>AgentVault</span><span>3 / 11</span></div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="kicker">The security boundary</div>
+  <h2>The policy firewall is a pure function — that is the whole point</h2>
+  <div class="cols">
+    <div class="col">
+      <ul>
+        <li>Takes an <strong>intent</strong>, the <strong>policy</strong> and <strong>spend state</strong>; returns a tier, reasons and the exact amount.</li>
+        <li>No I/O and no model calls, so it cannot be prompt-injected or raced.</li>
+        <li>Findings (address risk, anomaly) can only <strong>raise</strong> the tier, never lower it.</li>
+        <li>The executor re-checks the verdict immediately before signing, after any human approval wait.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <div class="code">
+<span class="g">evaluate</span>(intent, policy, state) →<br>
+&nbsp;&nbsp;{ tier, reasons, amountBase }<br><br>
+<span class="muted">// the LLM never sees a tool that can change</span><br>
+<span class="muted">// the policy, the limits or the kill switch.</span>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>AgentVault</span><span>4 / 11</span></div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="kicker">Permission tiers</div>
+  <h2>From "just do it" to "never" — one knob per action</h2>
+  <table>
+    <tr><th style="width:22mm">Tier</th><th>Meaning</th><th>Example</th></tr>
+    <tr><td><span class="pill t0">T0 read</span></td><td>Never touches the engine or the chain.</td><td>Portfolio, balances, quotes, history.</td></tr>
+    <tr><td><span class="pill t1">T1 auto</span></td><td>Executes with no human, inside tight limits.</td><td>0.0002 ETH to an allowlisted recipient.</td></tr>
+    <tr><td><span class="pill t2">T2 confirm</span></td><td>A human approves this exact transaction.</td><td>New recipient; above the auto limit.</td></tr>
+    <tr><td><span class="pill t3">T3 deny</span></td><td>Refused no matter who asks.</td><td>Over the hard cap; unlimited approval; paused.</td></tr>
+  </table>
+  <p class="muted" style="margin-top:6mm">Live limits: ETH auto 0.0005 / hard 0.005 / daily 0.01 · USDC 1 / 10 / 25 · WETH 0.001 / 0.01 / 0.02 · ≤10 tx/hour · single action ≤50% of portfolio.</p>
+  <div class="foot"><span>AgentVault</span><span>5 / 11</span></div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="kicker">On-chain backstop (bonus)</div>
+  <h2>If the key is stolen, the chain still caps the loss</h2>
+  <div class="cols">
+    <div class="col card">
+      <h3>AgentVault · v1 <span class="muted" style="font-size:3.6mm">0x098f…9388</span></h3>
+      <ul>
+        <li>Pre-funded vault; the agent holds no funds.</li>
+        <li>Per-tx cap, daily limit and a recipient allowlist enforced in Solidity.</li>
+        <li>Over-limit and non-allowlisted calls <strong>revert on-chain</strong> — real hashes in the evidence file.</li>
+      </ul>
+    </div>
+    <div class="col card">
+      <h3>AgentVault · v2 <span class="muted" style="font-size:3.6mm">new file, own address</span></h3>
+      <ul>
+        <li><strong>Session keys</strong>: owner-granted, expiring, capped <em>below</em> the vault's caps, revocable.</li>
+        <li>A stolen session key is bounded twice, and killing it never touches the owner.</li>
+        <li>ERC-20 support (<span class="code" style="padding:0 1mm;font-size:3.6mm">agentSendToken</span>); 37 Foundry tests incl. 4 fuzz.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:5mm">Same <span class="code" style="padding:0 1mm;font-size:3.6mm">agentSend</span> signature as v1, so the app routes through either vault with no code change.</p>
+  <div class="foot"><span>AgentVault</span><span>6 / 11</span></div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="kicker">Innovation</div>
+  <h2>Controls a human can reason with</h2>
+  <div class="grid3">
+    <div class="card">
+      <h3>Task budget envelope</h3>
+      <p class="muted">Give one goal its own cap, independent of the daily budget. The executor sums the task's sends from the audit log; a reverted tx still counts, so it can't be reset by retrying.</p>
+    </div>
+    <div class="card">
+      <h3>Counterfactual "what-if"</h3>
+      <p class="muted">"What if this recipient were allowlisted? What if the limit were higher?" — the engine answers both, side by side, without signing or changing anything.</p>
+    </div>
+    <div class="card">
+      <h3>Denial with a way forward</h3>
+      <p class="muted">A T3 refusal names the exact cap and proposes a compliant amount, so the agent stays useful instead of just saying no.</p>
+    </div>
+  </div>
+  <div class="card" style="margin-top:5mm">
+    <h3>Stale-allowance cleanup</h3>
+    <p class="muted"><span class="code" style="padding:0 1mm;font-size:3.6mm">approve(spender, 0)</span> is always allowed — it can only shrink what a spender may take — so a dangerous standing allowance can be removed even for a spender that is not on the allowlist.</p>
+  </div>
+  <div class="foot"><span>AgentVault</span><span>7 / 11</span></div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="kicker">Innovation · x402 v2</div>
+  <h2>The agent can buy data — the payment is still just a policy-checked transfer</h2>
+  <div class="cols">
+    <div class="col">
+      <ul>
+        <li>Reads a <strong>402 Payment Required</strong> body (v1 and v2 shapes), pinned to the configured origin only.</li>
+        <li>Picks the offer on our chain by <strong>CAIP-2</strong> network id.</li>
+        <li>Sends a base64 <strong>PaymentPayload</strong> as proof; the price is a normal <span class="code" style="padding:0 1mm;font-size:3.6mm">native_transfer</span> through the engine.</li>
+      </ul>
+    </div>
+    <div class="col card">
+      <h3>No double charge</h3>
+      <p class="muted">If the resource answers <span class="code" style="padding:0 1mm;font-size:3.6mm">settlement_pending</span> — the payment is broadcast but not yet final — the client keeps the hash and <strong>never retries</strong>. Re-paying a broadcast payment is a double charge.</p>
+    </div>
+  </div>
+  <div class="foot"><span>AgentVault</span><span>8 / 11</span></div>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <div class="kicker">Security &amp; compliance</div>
+  <h2>Controls, and the risks we do <em>not</em> hide</h2>
+  <div class="cols">
+    <div class="col">
+      <h3>Controls that hold</h3>
+      <ul>
+        <li>Zod validation of every untrusted tool argument.</li>
+        <li>Simulate, then re-check policy after human approval (anti-TOCTOU).</li>
+        <li>Hash-chained audit log; tamper is detectable.</li>
+        <li>Concurrent-budget reservation — no overdraft.</li>
+        <li>Kill switch the UI can only tighten.</li>
+        <li>Prompt-injection defence: tool output is untrusted data.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3>Known risks (R1–R18), honestly stated</h3>
+      <ul class="muted">
+        <li>A stolen hot key still moves funds in EOA mode — route value through the vault.</li>
+        <li>Audit log is tamper-<em>evident</em>, not immutable; on-chain anchoring is roadmap.</li>
+        <li>Address-poisoning detection is a heuristic; new recipients stay T2.</li>
+      </ul>
+      <p class="muted">Each entry has a likelihood, impact, mitigation and residual — see the self-assessment.</p>
+    </div>
+  </div>
+  <div class="foot"><span>AgentVault</span><span>9 / 11</span></div>
+</section>
+
+<!-- 10 -->
+<section class="slide">
+  <div class="kicker">Evidence</div>
+  <h2>Real testnet hashes, real tests, nothing staged</h2>
+  <div class="grid3" style="margin-bottom:6mm">
+    <div class="stat"><div class="label">Unit tests</div><div class="big num">232</div><div class="muted">24 files, vitest</div></div>
+    <div class="stat"><div class="label">Contract tests</div><div class="big num">49</div><div class="muted">12 v1 + 37 v2, incl. fuzz</div></div>
+    <div class="stat"><div class="label">Known risks</div><div class="big num">R1–R18</div><div class="muted">all with dispositions</div></div>
+  </div>
+  <ul>
+    <li><strong>docs/EXECUTION_EVIDENCE.md</strong> — every on-chain tx with tier, outcome and basescan link, generated from the audit log; includes the <em>reverted</em> over-limit calls.</li>
+    <li><strong>docs/SECURITY_SELF_ASSESSMENT.md</strong> — tiers, control table, Slither results and the risk list.</li>
+    <li><strong>docs/TECHNICAL.md</strong> — architecture and the full policy evaluation order.</li>
+  </ul>
+  <div class="foot"><span>AgentVault</span><span>10 / 11</span></div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="kicker">Where next</div>
+  <h2>The agent is capable; the wallet is paranoid</h2>
+  <div class="grid2">
+    <div class="card"><h3>Done</h3><ul>
+      <li>Policy firewall + tiers, web UI, audit chain.</li>
+      <li>On-chain vault v1, and v2 session keys + ERC-20.</li>
+      <li>x402 v2 paid data, task envelope, what-if.</li>
+    </ul></div>
+    <div class="card"><h3>Roadmap</h3><ul>
+      <li>Anchor the audit head on-chain (make deletion detectable).</li>
+      <li>Full account abstraction (ERC-4337 bundler / paymaster).</li>
+      <li>Cross-chain policy and atomic batched payouts.</li>
+    </ul></div>
+  </div>
+  <p class="lead" style="margin-top:6mm">LLM plans. Deterministic policy decides. The chain enforces.<br>Anyone can re-run the tests and check every hash.</p>
+  <div class="foot"><span>AgentVault</span><span>11 / 11</span></div>
+</section>
+
+</body>
+</html>

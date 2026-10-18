@@ -2,11 +2,15 @@ import 'dotenv/config';
 import { createServer } from 'node:http';
 import { createPublicClient, http, parseEther, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
+import { decodePayment } from '../src/x402.js';
 
 /**
- * A tiny x402-style paid API for the demo: GET /premium-quote answers 402 with
- * a price until the caller proves payment with an `x-payment: <txHash>` header
- * pointing at a confirmed Base Sepolia transfer to X402_PAY_TO.
+ * A tiny x402 v2 paid API for the demo: GET /premium-quote answers 402 with a
+ * price until the caller proves payment in the `X-PAYMENT` header. The proof may
+ * be a v2 base64 `PaymentPayload` (what the client sends) or a bare tx hash.
+ * A confirmed Base Sepolia transfer to X402_PAY_TO of at least the price unlocks
+ * the data; a broadcast-but-unconfirmed transfer answers 402 with
+ * `settlement_pending`, which the client must not retry.
  *
  * Run it in one terminal:            npm run x402:api
  * Then point the agent at it:        X402_API_URL=http://127.0.0.1:8790 in .env
@@ -27,14 +31,14 @@ const price = parseEther(PRICE_ETH);
 
 function paymentRequired(resource: string) {
   return {
-    x402Version: 1,
+    x402Version: 2,
     accepts: [
       {
         scheme: 'exact',
         network: 'eip155:84532',
         asset: 'ETH',
         payTo: PAY_TO,
-        maxAmountRequired: price.toString(),
+        amount: price.toString(),
         resource,
         description: 'Agent Vault premium market snapshot (demo data, testnet only)',
         maxTimeoutSeconds: 300,
@@ -43,20 +47,24 @@ function paymentRequired(resource: string) {
   };
 }
 
+type VerifyResult = { ok: true } | { ok: false; pending?: boolean; problem: string };
+
 /** True when the tx hash proves a confirmed transfer of >= price to PAY_TO. */
-async function verifyPayment(txHash: string): Promise<string | null> {
-  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return 'x-payment must be a tx hash.';
+async function verifyPayment(txHash: string): Promise<VerifyResult> {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { ok: false, problem: 'the payment proof carried no tx hash.' };
   try {
     const [receipt, tx] = await Promise.all([
       client.getTransactionReceipt({ hash: txHash as Hex }),
       client.getTransaction({ hash: txHash as Hex }),
     ]);
-    if (receipt.status !== 'success') return 'the payment transaction reverted.';
-    if ((tx.to ?? '').toLowerCase() !== PAY_TO!.toLowerCase()) return 'the payment went to a different address.';
-    if (tx.value < price) return `the payment was below ${PRICE_ETH} ETH.`;
-    return null;
+    if (receipt.status !== 'success') return { ok: false, problem: 'the payment transaction reverted.' };
+    if ((tx.to ?? '').toLowerCase() !== PAY_TO!.toLowerCase()) return { ok: false, problem: 'the payment went to a different address.' };
+    if (tx.value < price) return { ok: false, problem: `the payment was below ${PRICE_ETH} ETH.` };
+    return { ok: true };
   } catch {
-    return 'the payment transaction is not confirmed on Base Sepolia yet.';
+    // Broadcast but no receipt yet: non-terminal. Answer settlement_pending so the
+    // client keeps the hash instead of paying again.
+    return { ok: false, pending: true, problem: 'settlement_pending' };
   }
 }
 
@@ -71,16 +79,25 @@ const server = createServer(async (req, res) => {
     return send(404, { error: 'Only GET /premium-quote exists.' });
   }
 
-  const proof = req.headers['x-payment'];
-  if (typeof proof === 'string') {
-    const problem = await verifyPayment(proof);
-    if (problem) {
-      console.log(`402 again: ${problem} (proof ${proof.slice(0, 12)}…)`);
-      return send(402, { ...paymentRequired(url.pathname), error: problem });
+  const header = req.headers['x-payment'];
+  if (typeof header === 'string') {
+    const decoded = decodePayment(header);
+    const txHash = decoded?.payload.txHash ?? null;
+    if (!txHash) return send(402, { ...paymentRequired(url.pathname), error: 'x-payment was not a valid payment payload.' });
+
+    const check = await verifyPayment(txHash);
+    if (!check.ok) {
+      if (check.pending) {
+        console.log(`402 settlement_pending for ${txHash.slice(0, 12)}…`);
+        res.setHeader('x-settlement-status', 'settlement_pending');
+        return send(402, { x402Version: 2, status: 'settlement_pending', error: 'settlement_pending', txHash });
+      }
+      console.log(`402 again: ${check.problem} (proof ${txHash.slice(0, 12)}…)`);
+      return send(402, { ...paymentRequired(url.pathname), error: check.problem });
     }
     const block = await client.getBlockNumber();
     const blockData = await client.getBlock({ blockNumber: block });
-    console.log(`200 paid via ${proof.slice(0, 12)}… (block ${block})`);
+    console.log(`200 paid via ${txHash.slice(0, 12)}… (block ${block})`);
     return send(200, {
       report: 'Premium market snapshot (demo data, not financial advice)',
       chain: 'Base Sepolia',
