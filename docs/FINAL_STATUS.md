@@ -15,7 +15,7 @@ hash was touched.
 | Typecheck (web UI) | local, `npm --prefix web run typecheck` | clean |
 | UI production build | local, `npm --prefix web run build` | built, no chunk-size warning (pages are lazy-loaded) |
 | End-to-end + WCAG 2.2 AA | local, `npm run e2e` with `PW_CHANNEL=msedge` | **10 passed / 10**: 5 smoke flows, axe-core over the sign-in page and all 6 app pages in light **and** dark, keyboard contract, live region |
-| GitHub Actions CI | run `39230832281` on commit `3fe692f` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (10/10), Foundry (69/69), Docker build |
+| GitHub Actions CI | runs `39238065471` (push) and `39238073420` (PR #4) on commit `4ecdcc5` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (10/10), Foundry (69/69), Docker build |
 | Foundry contract tests | CI `contracts` job | **69 passed / 69** (AgentVault v1: 12, AgentVaultV2: 37, SessionKeyAccount: 20). Not run locally: Foundry is not installed on this machine; the new contract was compile-checked locally with solc 0.8.28 |
 | Lockfiles | local, `npm ci` (root and `web/`) | install cleanly |
 | Lint | — | no linter is configured in the repo |

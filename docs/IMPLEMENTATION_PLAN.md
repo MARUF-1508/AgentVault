@@ -171,7 +171,7 @@ exact verification results are in `docs/FINAL_STATUS.md`.
 - [x] Wallet UX: network indicator, RPC-down banner with retry, RPC fallback transport, `/api/health`.
 - [x] WCAG 2.2 AA: skip link, focus traps, live regions, contrast fixes; axe-core e2e over every page in both themes.
 - [x] CI: `.github/workflows/ci.yml` (typecheck, unit tests, UI build, Playwright + axe, Foundry, Docker build).
-- [x] Green CI on GitHub: run 39230832281 on `3fe692f`, all four jobs green (e2e 10/10, Foundry 69/69).
+- [x] Green CI on GitHub: runs 39238065471 and 39238073420 on `4ecdcc5`, all four jobs green (e2e 10/10, Foundry 69/69).
 - [ ] Live audit-anchor and batch transactions: blocked on this machine (no `.env`, no funded key); must run where the key lives.
 
 ---
