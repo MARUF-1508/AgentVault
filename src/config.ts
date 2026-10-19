@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { registerSecret } from './audit/redact.js';
+import { assertPinnedPolicy } from './policy/integrity.js';
 import { PolicySchema, type Policy } from './policy/types.js';
 
 /** A 0x-prefixed 20-byte address, for env vars that carry one. */
@@ -19,6 +21,30 @@ const EnvSchema = z.object({
   LLM_API_KEY: z.string().optional(),
   LLM_MODEL: z.string().default('gpt-4o-mini'),
   POLICY_FILE: z.string().default('config/policy.json'),
+  // Optional pin of the policy file's sha256 (full hash or >= 16-char prefix).
+  // When set, start-up refuses a policy file that does not match (S4).
+  POLICY_SHA256: z
+    .string()
+    .regex(/^[0-9a-fA-F]{16,64}$/, 'POLICY_SHA256 must be 16-64 hex chars')
+    .optional(),
+  // Fallback RPC endpoints (comma-separated), tried in order when RPC_URL fails.
+  RPC_FALLBACK_URLS: z.string().optional(),
+  // Optional out-of-band approver (I4): T2 requests are also sent to this
+  // Telegram chat, with Approve/Reject buttons. Both must be set to enable it.
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT_ID: z.string().regex(/^-?\d+$/, 'TELEGRAM_CHAT_ID must be a numeric chat id').optional(),
+  // Optional email approver (I4): T2 requests are mailed with signed one-time
+  // approve/reject links. SMTP_URL is e.g. smtps://user:pass@smtp.example.com:465.
+  SMTP_URL: z.string().regex(/^smtps?:\/\//, 'SMTP_URL must start with smtp:// or smtps://').optional(),
+  APPROVAL_EMAIL_TO: z.string().email().optional(),
+  APPROVAL_EMAIL_FROM: z.string().email().optional(),
+  // Signs the links (>= 32 chars). Unset: a random per-process secret, so links die with a restart.
+  APPROVAL_LINK_SECRET: z.string().min(32).optional(),
+  // Base URL the owner's browser uses to reach the UI, for the links. Defaults to the serve address.
+  PUBLIC_BASE_URL: z.string().url().optional(),
+  // Run enabled schedules in the background while `serve` is up (T5).
+  SCHEDULER: z.string().default('false'),
+  SCHEDULER_INTERVAL_SEC: z.coerce.number().int().min(15).max(3600).default(60),
   SCHEDULES_FILE: z.string().default('config/schedules.json'),
   AUDIT_LOG: z.string().default('data/audit.jsonl'),
   PAUSE_FILE: z.string().default('data/PAUSED'),
@@ -63,10 +89,18 @@ export function loadEnv(): Env {
     const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Invalid environment:\n${issues}`);
   }
+  // Every configured secret is scrubbed from audit entries and error text (S8).
+  registerSecret(parsed.data.AGENT_PRIVATE_KEY);
+  registerSecret(parsed.data.LLM_API_KEY);
+  registerSecret(parsed.data.TELEGRAM_BOT_TOKEN);
+  registerSecret(parsed.data.SMTP_URL);
+  registerSecret(parsed.data.APPROVAL_LINK_SECRET);
   return parsed.data;
 }
 
-export function loadPolicy(path: string): Policy {
+export function loadPolicy(path: string, pinnedSha256?: string): Policy {
+  // Integrity first: a pinned policy that does not match is never parsed (S4).
+  assertPinnedPolicy(path, pinnedSha256);
   const raw = JSON.parse(readFileSync(path, 'utf8'));
   return PolicySchema.parse(raw);
 }

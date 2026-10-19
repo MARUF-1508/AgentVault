@@ -1,9 +1,11 @@
 import { encodeFunctionData, erc20Abi, formatEther, maxUint256, parseUnits, type Hex } from 'viem';
 import type { Approver } from '../approval/approver.js';
+import { encodeAnchor } from '../audit/anchor.js';
 import type { AuditLog } from '../audit/log.js';
 import { explorerTx, type Clients } from '../chain/client.js';
 import { agentVaultAbi, agentVaultV2Abi } from '../chain/vault.js';
 import { encodeSwapCalldata, quoteExactInputSingle } from '../dex/uniswap.js';
+import { compliantAlternative, type Alternative } from '../policy/alternative.js';
 import { evaluate, intentAmount, intentAsset, tokenInfo } from '../policy/engine.js';
 import { spendStateFrom } from '../policy/state.js';
 import type { Decision, Intent, Policy, RiskInput, SpendState, SwapMarket } from '../policy/types.js';
@@ -11,22 +13,43 @@ import { whatIf, type WhatIfHypothesis, type WhatIfResult } from '../policy/what
 import { getPortfolio } from '../portfolio/portfolio.js';
 import { usdValueBase, USD_SCALE } from '../prices/price.js';
 import { checkAddress } from '../risk/address.js';
+import { decodeCall, type TxRequest } from './decode.js';
 
 /** How long an in-flight spend reservation is honoured before it is pruned. */
 const RESERVATION_TTL_MS = 5 * 60 * 1000;
+/** How long to wait for a receipt before reporting the transaction as pending. */
+const RECEIPT_TIMEOUT_MS = 90_000;
+/** Most transfers one batch may carry. */
+export const MAX_BATCH = 10;
 
 export interface ExecutionResult {
-  status: 'executed' | 'denied' | 'rejected_by_human' | 'simulation_failed' | 'reverted' | 'dry_run';
+  /**
+   * `pending`: broadcast, but no receipt arrived in time. It still counts toward
+   * the budget; track it with `txStatus`.
+   */
+  status: 'executed' | 'denied' | 'rejected_by_human' | 'simulation_failed' | 'reverted' | 'dry_run' | 'pending';
   decision: Decision;
   txHash?: Hex;
   explorerUrl?: string;
   error?: string;
 }
 
-interface TxRequest {
-  to: `0x${string}`;
-  value: bigint;
-  data?: Hex;
+/** Where a broadcast transaction stands (T4). */
+export interface TxStatus {
+  hash: Hex;
+  status: 'pending' | 'confirmed' | 'reverted' | 'unknown';
+  blockNumber?: string;
+  confirmations?: number;
+  explorerUrl?: string;
+  intent?: unknown;
+  sentAt?: string;
+}
+
+/** One line of a batch preview: the verdict with everything earlier in the batch already counted. */
+export interface BatchLine {
+  index: number;
+  intent: Intent;
+  decision: Decision;
 }
 
 /**
@@ -91,7 +114,7 @@ export class Executor {
    * hung cannot freeze the budget forever.
    */
   private spendState(except: number[] = []): SpendState {
-    const state = spendStateFrom(this.audit.read(), this.pauseFile);
+    const state = spendStateFrom(this.audit.read(), this.pauseFile, new Date(), this.policy.rateLimit.velocity?.windowMinutes);
     const now = Date.now();
     for (const [id, r] of this.reservations) {
       if (r.expires <= now) {
@@ -99,9 +122,145 @@ export class Executor {
         continue;
       }
       if (except.includes(id)) continue;
+      // A reservation is a transaction about to be broadcast: it counts against
+      // the budget, the hourly rate limit and the velocity window alike.
       state.spentToday[r.asset] = (state.spentToday[r.asset] ?? 0n) + r.amountBase;
+      state.txLastHour++;
+      if (state.velocity) {
+        state.velocity.txInWindow++;
+        state.velocity.spentInWindow[r.asset] = (state.velocity.spentInWindow[r.asset] ?? 0n) + r.amountBase;
+      }
     }
     return state;
+  }
+
+  /**
+   * Preview plus, when the verdict is not T1, the engine's own compliant
+   * alternative (T1): the largest amount the same policy accepts, re-checked by
+   * the engine. Read-only.
+   */
+  async previewWithAlternative(intent: Intent): Promise<{ decision: Decision; alternative?: Alternative }> {
+    const market = await this.marketFor(intent);
+    const risk = await this.riskFor(intent);
+    const decision = this.evaluateWith(intent, market, risk, []);
+    if (decision.tier === 'T1_AUTO') return { decision };
+    const state = this.spendState();
+    const alternative = compliantAlternative(intent, this.policy, risk ? { ...state, risk } : state, this.clients.chain.id);
+    return alternative ? { decision, alternative } : { decision };
+  }
+
+  /**
+   * Batch preview (T3): each transfer is evaluated as if every earlier line in
+   * the batch had already gone through, so a batch cannot sneak past the daily
+   * budget, the velocity guard or the rate limit one innocent-looking line at a
+   * time. Read-only; the pure engine decides every line.
+   */
+  async previewBatch(intents: Intent[]): Promise<BatchLine[]> {
+    if (intents.length === 0 || intents.length > MAX_BATCH) throw new Error(`A batch holds 1 to ${MAX_BATCH} transfers.`);
+    const state = this.spendState();
+    const lines: BatchLine[] = [];
+    for (const [index, intent] of intents.entries()) {
+      const market = await this.marketFor(intent);
+      const risk = await this.riskFor(intent);
+      const decision = evaluate(intent, this.policy, risk ? { ...state, risk } : state, this.clients.chain.id, market);
+      lines.push({ index, intent, decision });
+      if (decision.tier === 'T3_DENY') continue;
+      const counts = intent.kind !== 'erc20_approve' && intent.kind !== 'audit_anchor';
+      state.txLastHour++;
+      if (state.velocity) state.velocity.txInWindow++;
+      if (counts && decision.amountBase > 0n) {
+        state.spentToday[decision.asset] = (state.spentToday[decision.asset] ?? 0n) + decision.amountBase;
+        if (state.velocity) {
+          state.velocity.spentInWindow[decision.asset] = (state.velocity.spentInWindow[decision.asset] ?? 0n) + decision.amountBase;
+        }
+      }
+    }
+    return lines;
+  }
+
+  /**
+   * Executes a batch all-or-nothing at the policy level: if any line would be
+   * refused (with the earlier lines counted), nothing is sent. Lines then run one
+   * by one through `execute`, which re-checks each against the live state; the
+   * batch stops at the first line that does not execute.
+   */
+  async executeBatch(
+    intents: Intent[],
+    opts: { dryRun?: boolean } = {},
+  ): Promise<{ preview: BatchLine[]; results: ExecutionResult[]; stoppedAt?: number }> {
+    const preview = await this.previewBatch(intents);
+    this.audit.append('intent', { batch: intents.length, intents });
+    if (preview.some((l) => l.decision.tier === 'T3_DENY')) {
+      this.audit.append('decision', { tier: 'T3_DENY', reasons: ['Batch refused: at least one line breaks the policy.'], batch: true });
+      return { preview, results: [] };
+    }
+    const results: ExecutionResult[] = [];
+    for (const [i, intent] of intents.entries()) {
+      const r = await this.execute(intent, { dryRun: opts.dryRun });
+      results.push(r);
+      const ok = r.status === 'executed' || r.status === 'dry_run' || r.status === 'pending';
+      if (!ok) return { preview, results, stoppedAt: i };
+    }
+    return { preview, results };
+  }
+
+  /**
+   * Status of a broadcast transaction (T4): from the audit log first, then from
+   * the chain for anything still pending. A receipt found late is written to
+   * the audit log, so the log converges on what the chain says.
+   */
+  async txStatus(hash: Hex): Promise<TxStatus> {
+    const entries = this.audit.read();
+    const sent = entries.find((e) => e.type === 'tx_sent' && e.data.hash === hash);
+    const base: TxStatus = {
+      hash,
+      status: 'unknown',
+      explorerUrl: explorerTx(this.clients.chain, hash),
+      ...(sent ? { intent: sent.data.intent, sentAt: sent.ts } : {}),
+    };
+    const final = entries.find((e) => (e.type === 'tx_confirmed' || e.type === 'tx_failed') && e.data.hash === hash);
+    let blockNumber: bigint | undefined;
+    if (final) {
+      base.status = final.type === 'tx_confirmed' ? 'confirmed' : 'reverted';
+      blockNumber = final.data.blockNumber !== undefined ? BigInt(String(final.data.blockNumber)) : undefined;
+    } else {
+      try {
+        const receipt = await this.clients.publicClient.getTransactionReceipt({ hash });
+        blockNumber = receipt.blockNumber;
+        base.status = receipt.status === 'success' ? 'confirmed' : 'reverted';
+        if (sent) {
+          this.audit.append(base.status === 'confirmed' ? 'tx_confirmed' : 'tx_failed', {
+            hash,
+            blockNumber: receipt.blockNumber,
+            ...(base.status === 'confirmed' ? { gasUsed: receipt.gasUsed } : { stage: 'receipt' }),
+            late: true,
+          });
+        }
+      } catch {
+        base.status = sent ? 'pending' : 'unknown';
+      }
+    }
+    if (blockNumber !== undefined) {
+      base.blockNumber = blockNumber.toString();
+      try {
+        const head = await this.clients.publicClient.getBlockNumber();
+        base.confirmations = Number(head - blockNumber + 1n);
+      } catch {
+        // confirmations are best-effort
+      }
+    }
+    return base;
+  }
+
+  /** Broadcast transactions with no receipt in the audit log yet. */
+  pendingTxs(): { hash: string; sentAt: string; intent: unknown }[] {
+    const entries = this.audit.read();
+    const done = new Set(
+      entries.filter((e) => e.type === 'tx_confirmed' || e.type === 'tx_failed').map((e) => String(e.data.hash)),
+    );
+    return entries
+      .filter((e) => e.type === 'tx_sent' && !done.has(String(e.data.hash)))
+      .map((e) => ({ hash: String(e.data.hash), sentAt: e.ts, intent: e.data.intent }));
   }
 
   /** The single seam into the pure engine: current state (with reservations) in, a decision out. */
@@ -291,7 +450,8 @@ export class Executor {
     // both pass the same budget. The reservation is released on every exit.
     const marketAtSign = await this.marketFor(intent);
     const riskAtSign = await this.riskFor(intent);
-    const reservation = this.reserve(decision, intent.kind !== 'erc20_approve');
+    const countsToBudget = intent.kind !== 'erc20_approve' && intent.kind !== 'audit_anchor';
+    const reservation = this.reserve(decision, countsToBudget);
     try {
       const recheck = this.evaluateWith(intent, marketAtSign, riskAtSign, [reservation], envelope);
       if (recheck.tier === 'T3_DENY') {
@@ -316,11 +476,22 @@ export class Executor {
         tier: decision.tier,
         asset: decision.asset,
         amountBase: decision.amountBase,
-        countsToBudget: intent.kind !== 'erc20_approve',
+        countsToBudget,
         ...(opts.task ? { task: opts.task } : {}),
       });
+      // From here the spend counts from the audit log; keeping the reservation
+      // as well would count it twice and falsely refuse concurrent requests.
+      this.release(reservation);
 
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      let receipt;
+      try {
+        receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: RECEIPT_TIMEOUT_MS });
+      } catch (err) {
+        // Broadcast but unconfirmed: never silently drop it. It already counts
+        // toward the budget (tx_sent), and txStatus() can follow it up later.
+        this.audit.append('tx_pending', { hash, error: shortError(err) });
+        return { status: 'pending', decision, txHash: hash, explorerUrl, error: 'No receipt yet; the transaction is pending.' };
+      }
       if (receipt.status !== 'success') {
         this.audit.append('tx_failed', { hash, stage: 'receipt', blockNumber: receipt.blockNumber });
         return { status: 'reverted', decision, txHash: hash, explorerUrl };
@@ -333,6 +504,11 @@ export class Executor {
   }
 
   private buildTx(intent: Intent, decision: Decision): TxRequest {
+    if (intent.kind === 'audit_anchor') {
+      const self = this.clients.account?.address;
+      if (!self) throw new Error('Cannot anchor without a wallet key.');
+      return { to: self, value: 0n, data: encodeAnchor(intent.seq, intent.headHash) };
+    }
     if (intent.kind === 'native_transfer') {
       // Vault mode: the vault (pre-funded by the owner) pays out; this call
       // carries no value itself, so a stolen agent key cannot move more than
@@ -412,6 +588,7 @@ export class Executor {
    */
   effectLine(intent: Intent, d: Decision): string | null {
     const symbol = this.policy.native.symbol;
+    if (intent.kind === 'audit_anchor') return `No value moves; records audit entry #${intent.seq} on-chain`;
     if (intent.kind === 'native_transfer') {
       return this.vault
         ? `-${intent.amount} ${symbol} from AgentVault, +${intent.amount} ${symbol} to ${intent.to}`
@@ -429,13 +606,15 @@ export class Executor {
   }
 
   describe(intent: Intent, d: Decision, sim?: { gas?: bigint; gasFee?: bigint }): string {
-    const amt = intent.kind === 'swap' ? intent.amountIn : intent.amount;
+    const amt = intentAmount(intent);
     const target =
       intent.kind === 'erc20_approve'
         ? `spender ${intent.spender}`
         : intent.kind === 'swap'
           ? `router ${d.router ?? this.policy.swap?.router}`
-          : `to ${intent.to}`;
+          : intent.kind === 'audit_anchor'
+            ? 'the wallet itself'
+            : `to ${intent.to}`;
     const lines = [
       `  Action : ${intent.kind}`,
       `  Amount : ${amt} ${intent.kind === 'swap' ? '' : d.asset}`.trimEnd(),
@@ -448,6 +627,12 @@ export class Executor {
     }
     if (intent.kind === 'swap' && d.minAmountOut !== undefined) {
       lines.push(`  Min out: ${d.minAmountOut} (base units of ${intent.tokenOut})`);
+    }
+    // The decoded calldata of the exact transaction that will be signed (S6).
+    try {
+      lines.push(`  Call   : ${decodeCall(this.buildTx(intent, d), this.policy)}`);
+    } catch {
+      // Nothing buildable (read-only wallet); the lines above still describe it.
     }
     if (sim?.gas !== undefined) {
       const fee = sim.gasFee !== undefined ? ` (estimated fee ~${formatEther(sim.gasFee)} ${this.policy.native.symbol})` : '';

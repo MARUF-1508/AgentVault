@@ -47,7 +47,8 @@ function assetSymbol(intent: Intent, policy: Policy): string | null {
     case 'erc20_approve':
       return intent.token;
     case 'swap':
-      // Swap limits come from the swap rules, not per-token limits.
+    case 'audit_anchor':
+      // Swap limits come from the swap rules; an anchor moves no value.
       return null;
   }
 }

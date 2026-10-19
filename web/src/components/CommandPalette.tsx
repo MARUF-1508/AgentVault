@@ -1,3 +1,4 @@
+import { useFocusTrap } from '../a11y';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, Copy, LogOut, Moon, Search, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
@@ -27,6 +28,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
 
   const commands = useMemo<Command[]>(() => {
     const pages: Command[] = NAV.map(({ to, label, icon }) => ({
@@ -101,15 +103,19 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const shown = q ? commands.filter((c) => `${c.label} ${c.hint ?? ''} ${c.keywords}`.toLowerCase().includes(q)) : commands;
 
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setActive(0);
-      // Focus after the entrance animation starts, or Safari drops it.
-      setTimeout(() => inputRef.current?.focus(), 30);
-    }
+    if (!open) return;
+    setQuery('');
+    setActive(0);
+    // Focus after the entrance animation starts, or Safari drops it. Cancelled
+    // if the palette closes first: a late focus() on the closing input would
+    // steal focus back from the opener and then drop it on <body>.
+    const t = setTimeout(() => inputRef.current?.focus(), 30);
+    return () => clearTimeout(t);
   }, [open]);
 
   useEffect(() => setActive(0), [q]);
+  // Tab stays inside the palette and focus returns to the opener on close.
+  useFocusTrap(dialogRef, open, onClose);
 
   const run = (c: Command) => {
     onClose();
@@ -135,6 +141,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       {open && (
         <motion.div className="overlay palette-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
           <motion.section
+            ref={dialogRef}
             className="card palette"
             role="dialog"
             aria-modal="true"

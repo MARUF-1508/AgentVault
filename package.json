@@ -19,17 +19,23 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "a11y": "playwright test e2e/wcag.spec.ts",
+    "build:web": "npm --prefix web run build",
+    "check": "npm run typecheck && npm test && npm --prefix web run typecheck && npm run build:web"
   },
   "dependencies": {
     "dotenv": "^18.0.7",
+    "nodemailer": "^7.0.13",
     "openai": "^7.32.0",
     "viem": "^2.57.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
     "@vitest/coverage-v8": "^5.0.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

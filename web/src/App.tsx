@@ -1,5 +1,5 @@
 import { MotionConfig } from 'framer-motion';
-import type { ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './auth';
@@ -7,13 +7,28 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { WalletDataProvider } from './data';
 import { usePageTitle } from './format';
 import AppShell from './layout/AppShell';
-import Activity from './pages/Activity';
-import Agent from './pages/Agent';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
-import Security from './pages/Security';
-import Settings from './pages/Settings';
-import Transfer from './pages/Transfer';
+
+// Secondary pages load on first visit, which keeps the first paint small.
+const Activity = lazy(() => import('./pages/Activity'));
+const Agent = lazy(() => import('./pages/Agent'));
+const Security = lazy(() => import('./pages/Security'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Transfer = lazy(() => import('./pages/Transfer'));
+
+/** Loading state while a page's code arrives; announced politely to screen readers. */
+function PageLoading() {
+  return (
+    <div className="page-loading" role="status" aria-live="polite">
+      <span className="skeleton-line" />
+      <span className="skeleton-line short" />
+      <span className="sr-only">Loading the page…</span>
+    </div>
+  );
+}
+
+const page = (el: ReactNode) => <Suspense fallback={<PageLoading />}>{el}</Suspense>;
 import { ThemeProvider, useTheme } from './theme';
 import './styles.css';
 
@@ -68,11 +83,11 @@ export default function App() {
                   }
                 >
                   <Route index element={<Dashboard />} />
-                  <Route path="agent" element={<Agent />} />
-                  <Route path="transfer" element={<Transfer />} />
-                  <Route path="activity" element={<Activity />} />
-                  <Route path="security" element={<Security />} />
-                  <Route path="settings" element={<Settings />} />
+                  <Route path="agent" element={page(<Agent />)} />
+                  <Route path="transfer" element={page(<Transfer />)} />
+                  <Route path="activity" element={page(<Activity />)} />
+                  <Route path="security" element={page(<Security />)} />
+                  <Route path="settings" element={page(<Settings />)} />
                   <Route path="*" element={<NotFound />} />
                 </Route>
               </Routes>

@@ -48,7 +48,7 @@ test('previewing an allowlisted transfer shows T1 and sends nothing', async ({ p
   await page.getByRole('link', { name: 'Transfer', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Transfer' })).toBeVisible();
 
-  await page.getByLabel('Amount').fill('0.0001');
+  await page.getByLabel('Amount', { exact: true }).fill('0.0001');
   await page.getByRole('button', { name: /check tier/i }).click();
 
   // First allowlist label (alice) is preselected; 0.0001 is within the auto cap.
@@ -62,7 +62,11 @@ test('recipient lists give the label its own column and never overlap the button
   await ensureSignedIn(page);
 
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Recipients', exact: true }) });
+  // Settings is lazy-loaded: wait for the page itself before looking for the card.
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+  const heading = page.getByRole('heading', { name: 'Recipients', exact: true });
+  await expect(heading).toBeVisible();
+  const card = page.locator('.card', { has: heading });
   await card.scrollIntoViewIfNeeded();
 
   // Regression guard: the labels used to fall into the 28px avatar column of

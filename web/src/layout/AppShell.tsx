@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, LogOut, Menu, Moon, OctagonPause, Search, ShieldAlert, Sun, X } from 'lucide-react';
+import { ChevronDown, LogOut, Menu, Moon, OctagonPause, RefreshCw, Search, ShieldAlert, Sun, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useFocusTrap } from '../a11y';
 import { NavLink, useLocation, useOutlet } from 'react-router-dom';
 import { toast } from 'sonner';
 import { pause } from '../api';
@@ -48,6 +49,7 @@ function UserMenu() {
   const { me, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
@@ -55,13 +57,47 @@ function UserMenu() {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
+  // Keyboard: Escape closes and returns focus to the trigger; opening moves focus
+  // to the first item; focus leaving the menu closes it (WCAG 2.1.1, 2.4.3).
+  useEffect(() => {
+    if (!open) return;
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        trigger.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
   if (!me) return null;
   return (
-    <div className="menu" ref={ref}>
-      <button className="ghost user-chip" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+    <div
+      className="menu"
+      ref={ref}
+      onBlur={(e) => {
+        if (open && !ref.current?.contains(e.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
+      <button
+        ref={trigger}
+        className="ghost user-chip"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' && !open) {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
         <span className="avatar" aria-hidden>
           {me.user.slice(0, 1).toUpperCase()}
         </span>
+        <span className="sr-only">Account menu: </span>
         <span className="hide-sm">{me.user}</span>
         <span className={`role role-${me.role}`}>{me.role}</span>
         <ChevronDown size={14} aria-hidden />
@@ -80,6 +116,9 @@ function UserMenu() {
               Signed in as <strong>{me.user}</strong>
             </p>
             <p className="muted small">Can: {me.permissions.join(', ')}</p>
+            <p className="muted small">
+              <kbd>Ctrl</kbd>+<kbd>K</kbd> search · <kbd>Esc</kbd> close
+            </p>
             <button role="menuitem" className="ghost full" onClick={() => void logout()}>
               <LogOut size={16} aria-hidden /> Sign out
             </button>
@@ -150,6 +189,53 @@ function ApprovalPill() {
   );
 }
 
+/**
+ * MetaMask-style network indicator: which chain, and whether its RPC answers.
+ * Clicking it re-checks immediately. Degraded means read data may be stale;
+ * the policy engine still refuses anything it cannot price or simulate.
+ */
+function NetworkIndicator({ compact = false }: { compact?: boolean }) {
+  const { status, health, healthError, refresh } = useWallet();
+  const ok = health?.rpc.ok ?? false;
+  const label = health ? (ok ? 'Connected' : 'RPC unreachable') : healthError ? 'Server unreachable' : 'Checking…';
+  const chain = health?.chain ?? status?.chain ?? 'Network';
+  const detail = health?.rpc.ok
+    ? `Block ${health.rpc.blockNumber} · ${health.rpc.latencyMs} ms`
+    : (health?.rpc.error ?? healthError ?? 'Checking the chain connection');
+  return (
+    <button
+      type="button"
+      className={`net ${ok ? 'net-ok' : health || healthError ? 'net-bad' : ''} ${compact ? 'net-compact' : ''}`}
+      onClick={refresh}
+      title={`${detail}. Click to re-check.`}
+    >
+      {/* The accessible name starts with the visible text (WCAG 2.5.3); the rest is screen-reader only. */}
+      <span className={`dot ${ok ? 'ok' : health || healthError ? 'bad' : ''}`} aria-hidden />
+      <span>{chain}</span>
+      {!compact && <span className="muted small hide-sm">{ok ? `#${health!.rpc.blockNumber}` : label}</span>}
+      <span className="sr-only">
+        {compact || ok ? `, ${label}` : ''}. {detail}. Re-check the connection.
+      </span>
+    </button>
+  );
+}
+
+/** Shown when the chain RPC is down: says what still works and offers a retry. */
+function RpcBanner() {
+  const { health, refresh } = useWallet();
+  if (!health || health.rpc.ok) return null;
+  return (
+    <div className="banner warn" role="status">
+      <span>
+        Can't reach the {health.chain} RPC. Balances may be stale. Sending is refused until the chain answers again; nothing is queued.
+      </span>
+      <button className="ghost small" onClick={refresh}>
+        <RefreshCw size={14} aria-hidden /> Retry
+      </button>
+    </div>
+  );
+}
+
 function Shell() {
   const { resolved, toggle } = useTheme();
   const { status } = useWallet();
@@ -157,8 +243,23 @@ function Shell() {
   const outlet = useOutlet();
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const firstRoute = useRef(true);
+  useFocusTrap(drawerRef, drawer, () => setDrawer(false));
 
   useEffect(() => setDrawer(false), [location.pathname]);
+
+  // After client-side navigation, move focus to the new page so keyboard and
+  // screen-reader users start at its content instead of the old link (2.4.3).
+  useEffect(() => {
+    if (firstRoute.current) {
+      firstRoute.current = false;
+      return;
+    }
+    const t = setTimeout(() => mainRef.current?.focus({ preventScroll: false }), 60);
+    return () => clearTimeout(t);
+  }, [location.pathname]);
 
   // ⌘K / Ctrl-K opens the command palette from anywhere.
   useEffect(() => {
@@ -174,35 +275,39 @@ function Shell() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <a className="skip-link" href="#main">
+        Skip to main content
+      </a>
+      {/* One polite live region for status messages announced from anywhere (4.1.3). */}
+      <div id="av-live" className="sr-only" role="status" aria-live="polite" aria-atomic="true" />
+      <aside className="sidebar" aria-label="Sidebar">
         <Brand />
         <SideNav />
         <div className="sidebar-foot muted small">
-          {status && (
-            <>
-              <span className="dot ok" /> {status.chain}
-              {status.address && <span className="mono"> · {shortAddr(status.address)}</span>}
-            </>
-          )}
+          <NetworkIndicator compact />
+          {status?.address && <span className="mono">{shortAddr(status.address)}</span>}
         </div>
       </aside>
 
       <AnimatePresence>
         {drawer && (
           <>
-            <motion.div className="scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDrawer(false)} />
+            <motion.div className="scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDrawer(false)} aria-hidden />
             <motion.aside
+              ref={drawerRef}
               className="drawer"
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+              role="dialog"
+              aria-modal="true"
               aria-label="Menu"
             >
               <div className="row spread">
                 <Brand />
                 <button className="ghost icon" aria-label="Close menu" onClick={() => setDrawer(false)}>
-                  <X size={18} />
+                  <X size={18} aria-hidden />
                 </button>
               </div>
               <SideNav onNavigate={() => setDrawer(false)} />
@@ -213,9 +318,10 @@ function Shell() {
 
       <div className="content">
         <header className="topbar">
-          <button className="ghost icon only-sm" aria-label="Open menu" onClick={() => setDrawer(true)}>
-            <Menu size={20} />
+          <button className="ghost icon only-sm" aria-label="Open menu" aria-expanded={drawer} onClick={() => setDrawer(true)}>
+            <Menu size={20} aria-hidden />
           </button>
+          <NetworkIndicator />
           <div className="pills hide-sm">
             {status && (
               <>
@@ -228,10 +334,13 @@ function Shell() {
           </div>
           <div className="row topbar-actions">
             <ApprovalPill />
-            <button className="ghost palette-btn" aria-label="Search and commands (Ctrl+K)" title="Search and commands (Ctrl+K)" onClick={() => setPalette(true)}>
+            <button className="ghost palette-btn" title="Search and commands (Ctrl+K)" onClick={() => setPalette(true)}>
               <Search size={15} aria-hidden />
               <span className="hide-sm">Search</span>
-              <kbd className="palette-kbd hide-sm">⌘K</kbd>
+              <span className="sr-only"> and commands, Control K</span>
+              <kbd className="palette-kbd hide-sm" aria-hidden>
+                ⌘K
+              </kbd>
             </button>
             <PauseControl />
             <button className="ghost icon" onClick={toggle} aria-label={`Switch to ${resolved === 'dark' ? 'light' : 'dark'} theme`} title="Toggle theme">
@@ -244,7 +353,7 @@ function Shell() {
                   transition={{ duration: 0.2 }}
                   style={{ display: 'inline-flex' }}
                 >
-                  {resolved === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+                  {resolved === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
                 </motion.span>
               </AnimatePresence>
             </button>
@@ -253,6 +362,7 @@ function Shell() {
         </header>
 
         <OfflineBanner />
+        <RpcBanner />
 
         {status?.paused && (
           <p className="banner bad">
@@ -260,18 +370,22 @@ function Shell() {
           </p>
         )}
 
-        <AnimatePresence mode="wait">
-          <motion.main
-            key={location.pathname}
-            className="page"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-          >
-            {outlet}
-          </motion.main>
-        </AnimatePresence>
+        {/* Enter-only page transition. An exit animation (AnimatePresence
+            mode="wait") could get stuck when the route changed while the
+            current page was still animating in, leaving the old page on
+            screen after the URL had changed. */}
+        <motion.main
+          key={location.pathname}
+          ref={mainRef}
+          id="main"
+          tabIndex={-1}
+          className="page"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+        >
+          {outlet}
+        </motion.main>
       </div>
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} />

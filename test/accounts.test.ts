@@ -67,7 +67,7 @@ describe('first-run setup and owner-managed accounts', () => {
       publicClient: {},
       account: { address: '0x1111111111111111111111111111111111111111' },
     } as unknown as ToolContext['clients'];
-    const ctx = { clients, policy, executor: {}, audit } as unknown as ToolContext;
+    const ctx = { clients, policy, executor: { pendingTxs: () => [] }, audit } as unknown as ToolContext;
     server = createServer({ env, ctx, approver: new WebApprover(), users, distDir: '/nonexistent-dist' });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

@@ -1,4 +1,5 @@
 import { useAuth } from '../auth';
+import BatchCard from '../components/BatchCard';
 import PolicyCheck from '../components/PolicyCheck';
 import { BudgetMeters } from '../components/Portfolio';
 import { useWallet } from '../data';
@@ -35,6 +36,7 @@ export default function Transfer() {
             <h2>Today's limits</h2>
             <BudgetMeters budget={budget} />
           </section>
+          <BatchCard />
         </div>
       ) : (
         <p className="notice">Your role ({me?.role}) is read-only. Ask an owner for operator access to preview or send.</p>

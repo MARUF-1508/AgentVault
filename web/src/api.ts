@@ -5,6 +5,8 @@ export interface Holding {
   usdPrice?: string;
   usdValue?: string;
   priceSource?: string;
+  /** Set when this balance could not be read; the other holdings still load. */
+  error?: string;
 }
 
 export interface Portfolio {
@@ -18,8 +20,47 @@ export interface Portfolio {
 export interface Policy {
   native: { symbol: string; autoMaxPerTx: string; hardMaxPerTx: string; dailyBudget: string };
   tokens: Record<string, { autoMaxPerTx: string; hardMaxPerTx: string; dailyBudget: string }>;
-  recipients: { allowlist: Record<string, string>; denylist: string[] };
-  rateLimit: { maxTxPerHour: number };
+  recipients: { allowlist: Record<string, string>; denylist: string[]; contacts?: Record<string, string> };
+  rateLimit: { maxTxPerHour: number; velocity?: { windowMinutes: number; maxTx: number; maxSpendPct: number } };
+}
+
+export interface Health {
+  ok: boolean;
+  status: 'ok' | 'degraded';
+  chain: string;
+  chainId: number;
+  rpc: { ok: boolean; blockNumber?: string; latencyMs?: number; error?: string };
+  auditIntact: boolean;
+  uptimeSec: number;
+}
+
+export interface TxStatus {
+  hash: string;
+  status: 'pending' | 'confirmed' | 'reverted' | 'unknown';
+  blockNumber?: string;
+  confirmations?: number;
+  explorerUrl?: string;
+}
+
+/** The engine's compliant alternative to a refused or approval-bound transfer. */
+export interface Alternative {
+  available: boolean;
+  note: string;
+  intent?: TransferIntent;
+  tier?: Tier;
+}
+
+export interface Verdict {
+  tier: Tier;
+  reasons: string[];
+  explanation?: string;
+  alternative?: Alternative;
+}
+
+export interface BatchLine {
+  line: number;
+  tier: Tier;
+  reasons: string[];
 }
 
 export interface Status {
@@ -32,6 +73,9 @@ export interface Status {
   policyHash: string | null;
   llm: boolean;
   model: string | null;
+  policyIntegrity?: { hash: string | null; drift: boolean; pinned: boolean; matchesPin: boolean | null };
+  pendingTxs?: number;
+  scheduler?: { enabled: boolean; intervalSec: number; lastRunAt: string | null; lastError: string | null } | null;
 }
 
 export interface BudgetAsset {
@@ -156,10 +200,27 @@ export const getBudget = () => read<Budget>('/api/budget');
 export const getActivity = (limit = 30) => read<ActivityEntry[]>(`/api/activity?limit=${limit}`);
 export const getStats = () => read<DailyStat[]>('/api/stats');
 export const getVerify = () => read<{ ok: boolean; brokenAt?: number; reason?: string }>('/api/verify');
-export const getPending = () => read<{ pending: string | null; expiresAt: number | null }>('/api/pending');
-export const decide = (approved: boolean) => post<{ decided: boolean }>('/api/decide', { approved });
+export const getPending = () => read<{ pending: string | null; expiresAt: number | null; id: string | null }>('/api/pending');
+/** `id` names the exact request being answered, so a stale click can never approve a newer one. */
+export const decide = (approved: boolean, id: string) => post<{ decided: boolean }>('/api/decide', { approved, id });
+export const getHealth = () => api<Health>('/api/health');
+export const getTxStatus = (hash: string) => read<TxStatus>(`/api/tx?hash=${encodeURIComponent(hash)}`);
+export const getPendingTxs = () => read<{ pending: { hash: string; sentAt: string }[] }>('/api/tx/pending');
+export interface BatchTransfer {
+  to: string;
+  amount: string;
+  token?: string;
+}
+export const previewBatch = (transfers: BatchTransfer[]) =>
+  post<{ lines: BatchLine[]; allowed: boolean }>('/api/batch/preview', { transfers });
+export const sendBatch = (transfers: BatchTransfer[]) =>
+  post<{ lines: BatchLine[]; results: TransactResult[]; stoppedAtLine?: number }>('/api/batch', { transfers });
+export const addContact = (label: string, address: string) =>
+  post<{ policyHash: string; contacts: Record<string, string> }>('/api/policy/contacts/add', { label, address });
+export const removeContact = (label: string) =>
+  post<{ policyHash: string; contacts: Record<string, string> }>('/api/policy/contacts/remove', { label });
 export const pause = () => post<{ paused: boolean }>('/api/pause', {});
-export const preview = (intent: TransferIntent) => post<{ tier: Tier; reasons: string[] }>('/api/preview', { intent });
+export const preview = (intent: TransferIntent) => post<Verdict>('/api/preview', { intent });
 export const transact = (intent: TransferIntent) => post<TransactResult>('/api/transact', { intent });
 export const chat = (message: string, session?: string) =>
   post<{ session: string; answer: string; events?: string[] }>('/api/chat', { message, session });

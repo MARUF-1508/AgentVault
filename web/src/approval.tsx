@@ -30,6 +30,7 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
   const { me } = useAuth();
   const { refresh } = useWallet();
   const [summary, setSummary] = useState<string | null>(null);
+  const [id, setId] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,10 +45,11 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
           if (!alive) return;
           setSummary(r.pending);
           setExpiresAt(r.expiresAt);
+          setId(r.id);
           // Anything we have not seen yet (raised by the agent, or from another
           // tab) pulls the owner straight into the dialog.
-          if (r.pending && r.pending !== seen.current) setOpen(true);
-          seen.current = r.pending;
+          if (r.id && r.id !== seen.current) setOpen(true);
+          seen.current = r.id;
         })
         .catch(() => {});
     poll();
@@ -79,13 +81,16 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
 
   const answer = useCallback(
     async (approved: boolean) => {
+      if (!id) return;
       setBusy(true);
       try {
-        await decide(approved);
+        const { decided } = await decide(approved, id);
         setSummary(null);
         setExpiresAt(null);
+        setId(null);
         setOpen(false);
-        toast[approved ? 'success' : 'message'](approved ? 'Approved. Signing and broadcasting…' : 'Rejected. Nothing was signed.');
+        if (!decided) toast.message('That request is no longer waiting (it expired or was answered elsewhere). Nothing was signed.');
+        else toast[approved ? 'success' : 'message'](approved ? 'Approved. Signing and broadcasting…' : 'Rejected. Nothing was signed.');
         refresh();
       } catch (e) {
         toast.error((e as Error).message);
@@ -93,7 +98,7 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
         setBusy(false);
       }
     },
-    [refresh],
+    [refresh, id],
   );
 
   return (

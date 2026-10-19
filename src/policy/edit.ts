@@ -39,7 +39,7 @@ export function addRecipient(policy: Policy, labelRaw: string, addressRaw: strin
   if (lookalikeOf) {
     throw new Error(`${address} closely resembles the allowlisted ${lookalikeOf} (possible address poisoning). Refused.`);
   }
-  return PolicySchema.parse({ ...policy, recipients: { allowlist: { ...allowlist, [label]: address }, denylist } });
+  return PolicySchema.parse({ ...policy, recipients: { ...policy.recipients, allowlist: { ...allowlist, [label]: address }, denylist } });
 }
 
 /** Drops a known recipient. Fail-safe: sends to it fall back to T2, never automatic. */
@@ -48,7 +48,7 @@ export function removeRecipient(policy: Policy, labelRaw: string): Policy {
   if (!(label in policy.recipients.allowlist)) throw new Error(`No recipient called "${label}".`);
   const allowlist = { ...policy.recipients.allowlist };
   delete allowlist[label];
-  return PolicySchema.parse({ ...policy, recipients: { allowlist, denylist: policy.recipients.denylist } });
+  return PolicySchema.parse({ ...policy, recipients: { ...policy.recipients, allowlist } });
 }
 
 /**
@@ -63,7 +63,9 @@ export function addDenied(policy: Policy, addressRaw: string): Policy {
   if (denylist.some((a) => same(a, address))) throw new Error(`${address} is already on the denylist.`);
   const next = { ...allowlist };
   for (const [label, a] of Object.entries(next)) if (same(a, address)) delete next[label];
-  return PolicySchema.parse({ ...policy, recipients: { allowlist: next, denylist: [...denylist, address] } });
+  const contacts = { ...policy.recipients.contacts };
+  for (const [label, a] of Object.entries(contacts)) if (same(a, address)) delete contacts[label];
+  return PolicySchema.parse({ ...policy, recipients: { ...policy.recipients, allowlist: next, contacts, denylist: [...denylist, address] } });
 }
 
 /** Un-refuses an address. Escalating: it stops being T3 and becomes T2 or T1 again. */
@@ -73,7 +75,34 @@ export function removeDenied(policy: Policy, addressRaw: string): Policy {
   const index = denylist.findIndex((a) => same(a, address));
   if (index === -1) throw new Error(`${address} is not on the denylist.`);
   const next = [...denylist.slice(0, index), ...denylist.slice(index + 1)];
-  return PolicySchema.parse({ ...policy, recipients: { allowlist: policy.recipients.allowlist, denylist: next } });
+  return PolicySchema.parse({ ...policy, recipients: { ...policy.recipients, denylist: next } });
+}
+
+/**
+ * Adds an address-book contact (T2). Not escalating: a contact only gets a name,
+ * its transfers still need a human approval. Denied and lookalike addresses are
+ * refused so the book cannot be used to smuggle in a poisoned address.
+ */
+export function addContact(policy: Policy, labelRaw: string, addressRaw: string): Policy {
+  const label = Label.parse(labelRaw);
+  const address = AddressSchema.parse(addressRaw);
+  const { contacts, allowlist, denylist } = policy.recipients;
+  const taken = [...Object.keys(contacts), ...Object.keys(allowlist)].some((k) => k.toLowerCase() === label.toLowerCase());
+  if (taken) throw new Error(`There is already a recipient or contact called "${label}".`);
+  if (denylist.some((a) => same(a, address))) throw new Error(`${address} is on the denylist.`);
+  const { lookalikeOf } = assessAddress(address, policy);
+  if (lookalikeOf) {
+    throw new Error(`${address} closely resembles the allowlisted ${lookalikeOf} (possible address poisoning). Refused.`);
+  }
+  return PolicySchema.parse({ ...policy, recipients: { ...policy.recipients, contacts: { ...contacts, [label]: address } } });
+}
+
+export function removeContact(policy: Policy, labelRaw: string): Policy {
+  const label = labelRaw.trim();
+  if (!(label in policy.recipients.contacts)) throw new Error(`No contact called "${label}".`);
+  const contacts = { ...policy.recipients.contacts };
+  delete contacts[label];
+  return PolicySchema.parse({ ...policy, recipients: { ...policy.recipients, contacts } });
 }
 
 /**

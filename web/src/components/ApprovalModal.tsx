@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Minimize2, ShieldAlert } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusTrap } from '../a11y';
 import { useApproval } from '../approval';
 import { useAuth } from '../auth';
 import { splitReasons, TierBadge } from '../format';
@@ -45,7 +46,10 @@ export default function ApprovalModal() {
   const [now, setNow] = useState(Date.now());
   const [typed, setTyped] = useState('');
   const rejectRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const mayApprove = can('approve');
+  // Owners get a real modal: focus stays inside, Escape rejects (the safe answer).
+  useFocusTrap(dialogRef, Boolean(summary && open && mayApprove), () => void answer(false));
 
   // A fresh pending request starts with an empty confirmation field.
   useEffect(() => setTyped(''), [summary]);
@@ -80,12 +84,13 @@ export default function ApprovalModal() {
           role="dialog"
           aria-modal={mayApprove}
           aria-labelledby="approval-title"
-          onKeyDown={(e) => e.key === 'Escape' && mayApprove && answer(false)}
+          aria-describedby="approval-desc"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <motion.section
+            ref={dialogRef}
             className="card approval"
             initial={{ opacity: 0, scale: 0.94, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -105,7 +110,9 @@ export default function ApprovalModal() {
                 )}
               </div>
             </div>
-            <p className="muted">The policy engine allows this only with a human's yes. Check the recipient carefully.</p>
+            <p className="muted" id="approval-desc">
+              The policy engine allows this only with a human's yes. Check the recipient and the decoded call carefully.
+            </p>
             <dl className="fields">
               <dt>Action</dt>
               <dd>{(f.Action ?? '').replace(/_/g, ' ')}</dd>
@@ -133,6 +140,14 @@ export default function ApprovalModal() {
                 <>
                   <dt>Min out</dt>
                   <dd>{f['Min out']}</dd>
+                </>
+              )}
+              {f.Call && (
+                <>
+                  <dt>Call</dt>
+                  <dd className="mono small call" title="Decoded from the exact bytes that will be signed">
+                    {f.Call}
+                  </dd>
                 </>
               )}
               {f.Gas && (

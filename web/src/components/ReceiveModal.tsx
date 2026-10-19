@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { useEffect } from 'react';
+import { useRef } from 'react';
+import { useFocusTrap } from '../a11y';
 import { useWallet } from '../data';
 import { CopyButton } from '../format';
 
@@ -10,22 +11,17 @@ export default function ReceiveModal({ open, onClose }: { open: boolean; onClose
   const { status } = useWallet();
   const address = status?.address ?? null;
 
-  // Escape closes it like the command palette; the overlay click alone is not
-  // discoverable (and a stuck overlay blocks the whole page).
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  // Escape closes it like the command palette, Tab stays inside, and focus goes
+  // back to the button that opened it.
+  const ref = useRef<HTMLElement>(null);
+  useFocusTrap(ref, open && Boolean(address), onClose);
 
   return (
     <AnimatePresence>
       {open && address && (
         <motion.div className="overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Receive funds">
           <motion.section
+            ref={ref}
             className="card receive"
             initial={{ opacity: 0, scale: 0.95, y: 14 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -36,7 +32,7 @@ export default function ReceiveModal({ open, onClose }: { open: boolean; onClose
             <div className="row spread">
               <h2>Receive</h2>
               <button className="ghost icon" aria-label="Close" onClick={onClose}>
-                <X size={18} />
+                <X size={18} aria-hidden />
               </button>
             </div>
             <div className="qr-plate">

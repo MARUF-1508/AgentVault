@@ -27,6 +27,26 @@ export function evaluate(
   if (state.txLastHour >= policy.rateLimit.maxTxPerHour) {
     return deny('?', 0n, `Rate limit reached: ${state.txLastHour} transactions in the last hour.`);
   }
+  const velocity = policy.rateLimit.velocity;
+  if (velocity && state.velocity && state.velocity.txInWindow >= velocity.maxTx) {
+    return deny(
+      '?',
+      0n,
+      `Velocity guard: ${state.velocity.txInWindow} transactions in the last ${velocity.windowMinutes} minutes (limit ${velocity.maxTx}).`,
+    );
+  }
+
+  // Anchoring the audit head moves no value: a zero-value call to the wallet
+  // itself. It is still subject to the kill switch, chain and rate limits above.
+  if (intent.kind === 'audit_anchor') {
+    if (!/^[0-9a-f]{64}$/.test(intent.headHash)) return deny(policy.native.symbol, 0n, 'Audit anchor needs a sha256 head hash.');
+    return {
+      tier: 'T1_AUTO',
+      reasons: [`Anchors audit entry #${intent.seq} on-chain (zero value, to the wallet itself).`],
+      amountBase: 0n,
+      asset: policy.native.symbol,
+    };
+  }
 
   if (intent.kind === 'swap') return evaluateSwap(intent, policy, state, deny, market);
 
@@ -113,6 +133,8 @@ export function evaluate(
       `Daily budget exceeded: ${fmt(spent)} already spent today, budget is ${fmt(budget)}.`,
     );
   }
+  const burst = velocityReason(state, policy, symbol, amountBase, budget, fmt);
+  if (burst) return deny(symbol, amountBase, burst);
 
   const reasons: string[] = [];
   const known = Object.values(policy.recipients.allowlist).includes(target);
@@ -200,6 +222,8 @@ function evaluateSwap(
   }
   const envIn = envelopeReason(state, tokenIn.symbol, amountBase, fmtIn);
   if (envIn) return deny(tokenIn.symbol, amountBase, envIn);
+  const burst = velocityReason(state, policy, tokenIn.symbol, amountBase, inBudget, fmtIn);
+  if (burst) return deny(tokenIn.symbol, amountBase, burst);
 
   // Day 3: a swap also moves value; apply the portfolio anomaly guard.
   const anomaly = anomalyReason(state, policy);
@@ -242,7 +266,31 @@ function evaluateSwap(
   };
 }
 
-function resolveAsset(intent: Exclude<Intent, { kind: 'swap' }>, policy: Policy) {
+/**
+ * Velocity guard on value (S5): within the rolling window, spend on one asset may
+ * not exceed `maxSpendPct`% of that asset's daily budget. Pure: the window's
+ * spend comes in via `SpendState.velocity`.
+ */
+function velocityReason(
+  state: SpendState,
+  policy: Policy,
+  symbol: string,
+  amountBase: bigint,
+  dailyBudget: bigint,
+  fmt: (v: bigint) => string,
+): string | undefined {
+  const v = policy.rateLimit.velocity;
+  if (!v || !state.velocity || v.maxSpendPct >= 100) return undefined;
+  // Basis points keep fractional percentages exact without floating point.
+  const cap = (dailyBudget * BigInt(Math.round(v.maxSpendPct * 100))) / 10_000n;
+  const spent = state.velocity.spentInWindow[symbol] ?? 0n;
+  if (spent + amountBase > cap) {
+    return `Velocity guard: ${fmt(spent)} already sent in the last ${v.windowMinutes} minutes; at most ${fmt(cap)} (${v.maxSpendPct}% of the daily budget) may move in that window.`;
+  }
+  return undefined;
+}
+
+function resolveAsset(intent: Exclude<Intent, { kind: 'swap' | 'audit_anchor' }>, policy: Policy) {
   if (intent.kind === 'native_transfer') {
     return { symbol: policy.native.symbol, decimals: 18, limits: policy.native, address: undefined };
   }
@@ -257,6 +305,7 @@ function resolveAsset(intent: Exclude<Intent, { kind: 'swap' }>, policy: Policy)
  * is the input token. Undefined when the token is not in the policy.
  */
 export function intentAsset(intent: Intent, policy: Policy): { symbol: string; decimals: number } | undefined {
+  if (intent.kind === 'audit_anchor') return { symbol: policy.native.symbol, decimals: 18 };
   if (intent.kind === 'swap') {
     const t = tokenInfo(policy, intent.tokenIn);
     return t ? { symbol: t.symbol, decimals: t.decimals } : undefined;
@@ -267,6 +316,7 @@ export function intentAsset(intent: Intent, policy: Policy): { symbol: string; d
 
 /** The human-readable amount string an intent carries. */
 export function intentAmount(intent: Intent): string {
+  if (intent.kind === 'audit_anchor') return '0';
   return intent.kind === 'swap' ? intent.amountIn : (intent.amount as string);
 }
 

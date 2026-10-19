@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { Eye, EyeOff, KeyRound, Lock, ShieldCheck, User, UserRoundPlus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { getSetupNeeded, setup, TotpRequiredError } from '../api';
 import { useAuth } from '../auth';
@@ -14,7 +14,6 @@ export default function Login() {
   usePageTitle('Sign in');
   const { me, login, refresh } = useAuth();
   const { resolved, toggle } = useTheme();
-  const navigate = useNavigate();
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/';
   const [needed, setNeeded] = useState(false);
   const [username, setUsername] = useState('');
@@ -49,7 +48,8 @@ export default function Login() {
     const done = (name: string) => {
       clearFields();
       toast.success(needed ? `Owner account created. Welcome, ${name}.` : `Welcome back, ${name}.`);
-      navigate(from, { replace: true });
+      // No navigate() here: once the session is in the provider this page
+      // renders <Navigate to={from}>, so a second redirect is redundant.
     };
     if (needed) {
       if (!USERNAME_RE.test(username.trim())) return fail('Username: 2-32 of a-z 0-9 _ -.');

@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, unit tests, UI build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - name: Install
+        run: |
+          npm ci --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+      - name: Typecheck (agent + tests)
+        run: npm run typecheck
+      - name: Unit and integration tests
+        run: npm test
+      - name: Typecheck (web UI)
+        run: npm --prefix web run typecheck
+      - name: Build (web UI)
+        run: npm --prefix web run build
+      - name: Policy file parses and prints its pin
+        run: npm run --silent cli -- policy hash
+
+  e2e:
+    name: End-to-end + WCAG 2.2 AA (axe)
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - name: Install
+        run: |
+          npm ci --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+      - name: Build the UI the server will serve
+        run: npm --prefix web run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      # Smoke flow plus axe-core over every page in both themes, the keyboard
+      # contract and the live region. The server runs with a fresh, unfunded
+      # random key (playwright.config.ts); no secret is used.
+      - name: Playwright
+        run: npm run e2e
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  contracts:
+    name: Foundry tests (AgentVault v1, v2 and the ERC-4337 account)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Install forge-std (lib/ is git-ignored)
+        run: git clone --depth 1 https://github.com/foundry-rs/forge-std lib/forge-std
+      - name: Build
+        run: forge build --sizes
+      - name: Test
+        run: forge test -vv
+
+  docker:
+    name: Container image builds
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build -t agentvault:ci .

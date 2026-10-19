@@ -8,15 +8,23 @@ import { z } from 'zod';
 import { chatTurn } from '../agent/agent.js';
 import { runTool, type ToolContext } from '../agent/tools.js';
 import type { WebApprover } from '../approval/approver.js';
+import { EmailApprover, verifyLink } from '../approval/email.js';
+import { redactText } from '../audit/redact.js';
 import { can, permissionsOf, ROLES, type Permission } from '../auth/rbac.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from '../auth/totp.js';
 import { LoginThrottle, Sessions, type User, type UserStore } from '../auth/users.js';
 import type { Env } from '../config.js';
 import { pauseWallet } from '../policy/killswitch.js';
-import { addDenied, addRecipient, applyPolicy, removeDenied, removeRecipient, writePolicyAtomic } from '../policy/edit.js';
+import { parseBatch } from '../executor/batch.js';
+import { explainTier } from '../policy/alternative.js';
+import { addContact, addDenied, addRecipient, applyPolicy, removeContact, removeDenied, removeRecipient, writePolicyAtomic } from '../policy/edit.js';
+import { PolicyIntegrity } from '../policy/integrity.js';
 import { spendStateFrom } from '../policy/state.js';
 import { ActionIntentSchema, IntentSchema } from '../policy/types.js';
+import { buildComplianceReport } from '../report/compliance.js';
 import { dailyStats } from '../report/stats.js';
+import type { SchedulerStatus } from '../schedule/background.js';
+import { RateLimiter } from './ratelimit.js';
 
 export interface WebServerOptions {
   env: Env;
@@ -29,7 +37,30 @@ export interface WebServerOptions {
   /** Web-UI accounts. Every /api route except login needs a session. */
   users: UserStore;
   sessions?: Sessions;
+  /** Background scheduler state (T5), shown on /api/status when it runs. */
+  scheduler?: SchedulerStatus;
+  /** Signed email approval links (I4); absent = the link routes answer 404. */
+  emailLinks?: { secret: string };
+  /** Override the per-user API limits (tests). */
+  rateLimits?: ConstructorParameters<typeof RateLimiter>[0];
 }
+
+/** Per-user request limits for the routes that cost an LLM call or may move money. */
+const DEFAULT_LIMITS: ConstructorParameters<typeof RateLimiter>[0] = {
+  chat: { max: 20, windowMs: 60_000 },
+  transact: { max: 20, windowMs: 60_000 },
+  preview: { max: 60, windowMs: 60_000 },
+};
+const BUCKET: Record<string, string> = {
+  'POST /api/chat': 'chat',
+  'POST /api/transact': 'transact',
+  'POST /api/batch': 'transact',
+  'POST /api/preview': 'preview',
+  'POST /api/batch/preview': 'preview',
+};
+/** Chat histories kept per user, and in total (oldest dropped first). */
+const MAX_CHATS_PER_USER = 5;
+const MAX_CHATS = 200;
 
 /** Which permission each API route needs. Anything not listed is 404. */
 export const ROUTES: Record<string, Permission> = {
@@ -43,6 +74,11 @@ export const ROUTES: Record<string, Permission> = {
   'GET /api/audit/export': 'read',
   'GET /api/verify': 'read',
   'GET /api/pending': 'read',
+  'GET /api/tx': 'read',
+  'GET /api/tx/pending': 'read',
+  'GET /api/compliance': 'read',
+  'POST /api/batch/preview': 'preview',
+  'POST /api/batch': 'transact',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
   'POST /api/users/remove': 'admin',
@@ -58,6 +94,9 @@ export const ROUTES: Record<string, Permission> = {
   'POST /api/policy/recipients/remove': 'admin',
   'POST /api/policy/deny/add': 'admin',
   'POST /api/policy/deny/remove': 'admin',
+  // Address book (T2): names for addresses, never a trust grant, still owner-only.
+  'POST /api/policy/contacts/add': 'admin',
+  'POST /api/policy/contacts/remove': 'admin',
 };
 
 /** First 16 hex chars of the policy file's sha256, shown in the UI. */
@@ -109,14 +148,18 @@ function setCookie(res: ServerResponse, token: string, maxAgeSec: number): void 
   res.setHeader('set-cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`);
 }
 
-const DecideSchema = z.object({ approved: z.boolean() });
+// The id names the exact request being answered (see WebApprover.decide).
+const DecideSchema = z.object({ approved: z.boolean(), id: z.string().uuid() });
+const ContactSchema = z.object({ label: z.string(), address: z.string() });
+const BatchSchema = z.object({ transfers: z.unknown() });
 const ChatSchema = z.object({ message: z.string().min(1).max(4000), session: z.string().max(100).optional() });
 const TransactSchema = z.object({ intent: z.unknown() });
 
 const stringify = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? x.toString() : x));
 
 function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'content-type': 'application/json' });
+  // API answers carry balances and audit data: never cache them.
+  res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   res.end(stringify(body));
 }
 
@@ -139,6 +182,9 @@ function hostnameOf(value: string | undefined, withScheme: boolean): string | nu
  * trigger a transaction. Every /api route beyond login and first-run setup then
  * still requires a signed-in session (see ROUTES).
  */
+/** The one route that accepts an HTML form post: the email-link confirmation button. */
+const FORM_ROUTE = '/api/approve-link';
+
 function rejectForeign(req: IncomingMessage): { status: number; error: string } | null {
   const host = hostnameOf(req.headers.host, false);
   if (!host || !LOOPBACK.has(host)) return { status: 403, error: 'Host must be loopback.' };
@@ -146,8 +192,21 @@ function rejectForeign(req: IncomingMessage): { status: number; error: string } 
   if (origin !== undefined && !LOOPBACK.has(hostnameOf(origin, true) ?? '')) {
     return { status: 403, error: 'Cross-origin requests are refused.' };
   }
-  if (req.method === 'POST' && !(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+  // Defence in depth for browsers that send Fetch Metadata: a request another
+  // site initiated is refused even if it somehow carried a loopback Origin.
+  if (req.headers['sec-fetch-site'] === 'cross-site') {
+    return { status: 403, error: 'Cross-site requests are refused.' };
+  }
+  const type = (req.headers['content-type'] ?? '').toLowerCase();
+  // The email confirmation page posts a plain form to itself. It still has to
+  // come from a loopback Origin (checked above) and carry a valid signed link;
+  // every other POST must be JSON.
+  const formPost = new URL(req.url ?? '/', 'http://localhost').pathname === FORM_ROUTE && type.startsWith('application/x-www-form-urlencoded');
+  if (req.method === 'POST' && !type.startsWith('application/json') && !formPost) {
     return { status: 415, error: 'POST bodies must be application/json.' };
+  }
+  if (formPost && req.headers.origin === undefined) {
+    return { status: 403, error: 'The confirmation must be sent from the Agent Vault page.' };
   }
   return null;
 }
@@ -177,6 +236,32 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
+function readForm(req: IncomingMessage): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (c: Buffer) => {
+      body += c.toString('utf8');
+      if (body.length > 10_000) {
+        reject(new Error('request body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(Object.fromEntries(new URLSearchParams(body))));
+    req.on('error', reject);
+  });
+}
+
+const escapeHtml = (v: string) =>
+  v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** A minimal, script-free page for the email-link flow (the CSP forbids inline script anyway). */
+function sendPage(res: ServerResponse, status: number, title: string, body: string): void {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)} · Agent Vault</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 16px;color:#0b1736;background:#f3f7ff}pre{white-space:pre-wrap;background:#fff;border:1px solid #cddbf7;border-radius:10px;padding:12px}button{font:inherit;font-weight:600;padding:.6rem 1.1rem;border-radius:10px;border:0;color:#fff;cursor:pointer}.approve{background:#065f46}.reject{background:#b91c1c}button:focus-visible{outline:3px solid #1d4ed8;outline-offset:2px}</style></head>
+<body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`);
+}
+
 const STATIC_TYPES: Record<string, string> = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -202,7 +287,20 @@ export function createServer(opts: WebServerOptions): Server {
   const { users } = opts;
   const sessions = opts.sessions ?? new Sessions();
   const throttle = new LoginThrottle();
+  const limiter = new RateLimiter(opts.rateLimits ?? DEFAULT_LIMITS);
+  const integrity = new PolicyIntegrity(env.POLICY_FILE, env.POLICY_SHA256);
+  const startedAt = Date.now();
+  let health: { at: number; body: Record<string, unknown> } | null = null;
   const chats = new Map<string, OpenAI.Chat.Completions.ChatCompletionMessageParam[]>();
+  /** Keeps a user's chat histories bounded; Map order is insertion order, so the first key is the oldest. */
+  const rememberChat = (key: string, history: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) => {
+    chats.delete(key);
+    chats.set(key, history);
+    const prefix = key.slice(0, key.indexOf(':') + 1);
+    const mine = [...chats.keys()].filter((k) => k.startsWith(prefix));
+    for (const k of mine.slice(0, Math.max(0, mine.length - MAX_CHATS_PER_USER))) chats.delete(k);
+    while (chats.size > MAX_CHATS) chats.delete(chats.keys().next().value!);
+  };
   // Unconfirmed TOTP secrets: enabled only after one valid code (10-minute window).
   const pendingTotp = new Map<string, { secret: string; at: number }>();
   // Recomputed per request, never cached: the owner can edit the recipient lists
@@ -237,10 +335,72 @@ export function createServer(opts: WebServerOptions): Server {
       res.setHeader('referrer-policy', 'no-referrer');
       res.setHeader('x-frame-options', 'DENY');
       res.setHeader('content-security-policy', csp);
+      res.setHeader('permissions-policy', 'microphone=(self), camera=(), geolocation=(), payment=(), usb=()');
+      res.setHeader('cross-origin-opener-policy', 'same-origin');
       const url = new URL(req.url ?? '/', 'http://localhost');
       const path = url.pathname;
       const foreign = rejectForeign(req);
       if (foreign) return send(res, foreign.status, { error: foreign.error });
+
+      // Email approval links (I4). Signature-authenticated, not session-based:
+      // the link itself is the capability, bound to one request id and its
+      // deadline. GET only shows a confirmation page (mail scanners prefetch
+      // links); the POST from that page's button is what decides.
+      if (path === FORM_ROUTE) {
+        if (!opts.emailLinks) return send(res, 404, { error: 'Email approvals are not configured.' });
+        if (req.method === 'GET') {
+          const raw = Object.fromEntries(url.searchParams);
+          const v = verifyLink(opts.emailLinks.secret, raw);
+          const pending = approver.getPendingDetail();
+          if (!v.ok || !pending || pending.id !== v.link.id) {
+            return sendPage(res, 410, 'Link not usable', `<p>${escapeHtml(v.ok ? 'This request is no longer waiting.' : `This link cannot be used (${v.reason}).`)} Nothing was signed.</p>`);
+          }
+          const approve = v.link.action === 'approve';
+          const hidden = ['id', 'action', 'exp', 'sig']
+            .map((k) => `<input type="hidden" name="${k}" value="${escapeHtml(String(raw[k] ?? ''))}">`)
+            .join('');
+          return sendPage(
+            res,
+            200,
+            approve ? 'Approve this transaction?' : 'Reject this transaction?',
+            `<pre>${escapeHtml(pending.summary)}</pre><form method="post" action="${FORM_ROUTE}">${hidden}<button type="submit" class="${approve ? 'approve' : 'reject'}">${approve ? 'Approve and sign' : 'Reject'}</button></form><p>The policy is checked again before anything is signed. A refused (T3) request can never be approved.</p>`,
+          );
+        }
+        if (req.method === 'POST') {
+          const form = await readForm(req);
+          const r = EmailApprover.decideFromLink(approver, ctx.audit, opts.emailLinks.secret, form);
+          return sendPage(res, r.ok ? 200 : 410, r.ok ? 'Done' : 'Not applied', `<p>${escapeHtml(r.message)}</p>`);
+        }
+      }
+
+      // Liveness/readiness probe (Docker HEALTHCHECK, uptime checks). No sign-in,
+      // and nothing sensitive: chain, RPC reachability, block height, uptime.
+      if (req.method === 'GET' && path === '/api/health') {
+        if (!health || Date.now() - health.at > 5_000) {
+          const t0 = Date.now();
+          let rpc: Record<string, unknown>;
+          try {
+            const block = await ctx.clients.publicClient.getBlockNumber();
+            rpc = { ok: true, blockNumber: block.toString(), latencyMs: Date.now() - t0 };
+          } catch (err) {
+            rpc = { ok: false, error: redactText(err instanceof Error ? err.message.split('\n')[0]! : String(err)).slice(0, 160) };
+          }
+          health = {
+            at: Date.now(),
+            body: {
+              ok: rpc.ok === true,
+              status: rpc.ok === true ? 'ok' : 'degraded',
+              chain: ctx.clients.chain.name,
+              chainId: ctx.clients.chain.id,
+              rpc,
+              auditIntact: ctx.audit.verify().ok,
+              uptimeSec: Math.round((Date.now() - startedAt) / 1000),
+            },
+          };
+        }
+        // 200 even when degraded: the UI still works read-only, and the body says why.
+        return send(res, 200, health.body);
+      }
 
       if (req.method === 'POST' && path === '/api/auth/login') {
         const parsed = LoginSchema.safeParse(await readBody(req));
@@ -367,6 +527,12 @@ export function createServer(opts: WebServerOptions): Server {
       if (path.startsWith('/api/') && needs) {
         if (!user) return send(res, 401, { error: 'Not signed in.' });
         if (!can(user.role, needs)) return send(res, 403, { error: `Your role (${user.role}) cannot ${needs}.` });
+        const bucket = BUCKET[`${req.method} ${path}`];
+        const wait = bucket ? limiter.take(user.username, bucket) : 0;
+        if (wait > 0) {
+          res.setHeader('retry-after', String(wait));
+          return send(res, 429, { error: `Too many requests. Try again in ${wait} s.` });
+        }
       }
 
       if (req.method === 'GET' && path === '/api/status') {
@@ -381,6 +547,10 @@ export function createServer(opts: WebServerOptions): Server {
           policyHash: policyHash(),
           llm: Boolean(env.LLM_API_KEY),
           model: env.LLM_API_KEY ? env.LLM_MODEL : null,
+          policyIntegrity: integrity.status(),
+          velocity: ctx.policy.rateLimit.velocity ?? null,
+          scheduler: opts.scheduler ?? null,
+          pendingTxs: ctx.executor.pendingTxs().length,
         });
       }
       if (req.method === 'GET' && path === '/api/budget') {
@@ -424,6 +594,36 @@ export function createServer(opts: WebServerOptions): Server {
       // Owner-only recipient-list edits. Hand-editing config/policy.json used to be
       // the only way to change these, which left every change unaudited and unchecked;
       // these routes make it an owner-only, re-authenticated, logged operation.
+      if (req.method === 'POST' && (path === '/api/policy/contacts/add' || path === '/api/policy/contacts/remove')) {
+        const parsed = (path.endsWith('/add') ? ContactSchema : RemoveRecipientSchema).safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Check the contact fields and try again.' });
+        const before = policyHash();
+        let next;
+        try {
+          next = path.endsWith('/add')
+            ? addContact(ctx.policy, parsed.data.label, (parsed.data as z.infer<typeof ContactSchema>).address)
+            : removeContact(ctx.policy, parsed.data.label);
+        } catch (err) {
+          return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        try {
+          writePolicyAtomic(env.POLICY_FILE, next);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          return send(res, code === 'EROFS' ? 409 : 500, { error: code === 'EROFS' ? 'The policy file is read-only in this deployment.' : 'Could not write the policy file.' });
+        }
+        applyPolicy(ctx.policy, next);
+        integrity.accept();
+        ctx.audit.append('access', {
+          event: path.endsWith('/add') ? 'contact_added' : 'contact_removed',
+          by: user!.username,
+          label: parsed.data.label,
+          policyHashBefore: before,
+          policyHashAfter: policyHash(),
+        });
+        return send(res, 200, { policyHash: policyHash(), contacts: ctx.policy.recipients.contacts });
+      }
+
       if (path.startsWith('/api/policy/recipients/') || path.startsWith('/api/policy/deny/')) {
         // Adding a known recipient, or un-denying one, lowers the tier that address
         // gets, so those two need the owner's password again.
@@ -481,6 +681,7 @@ export function createServer(opts: WebServerOptions): Server {
           });
         }
         applyPolicy(ctx.policy, next);
+        integrity.accept();
         const event = path.endsWith('/add')
           ? path.includes('deny')
             ? 'deny_added'
@@ -523,14 +724,61 @@ export function createServer(opts: WebServerOptions): Server {
       }
       if (req.method === 'GET' && path === '/api/pending') {
         const detail = approver.getPendingDetail();
-        return send(res, 200, { pending: detail?.summary ?? null, expiresAt: detail?.expiresAt ?? null });
+        return send(res, 200, { pending: detail?.summary ?? null, expiresAt: detail?.expiresAt ?? null, id: detail?.id ?? null });
       }
       if (req.method === 'POST' && path === '/api/decide') {
         const parsed = DecideSchema.safeParse(await readBody(req));
-        if (!parsed.success) return send(res, 400, { error: 'Body must be { approved: boolean }.' });
-        const decided = approver.decide(parsed.data.approved);
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { approved: boolean, id: <pending request id> }.' });
+        const decided = approver.decide(parsed.data.approved, parsed.data.id, user!.username);
         if (decided) ctx.audit.append('access', { event: 'decide', user: user!.username, approved: parsed.data.approved });
         return send(res, 200, { decided });
+      }
+      if (req.method === 'GET' && path === '/api/tx') {
+        const hash = url.searchParams.get('hash') ?? '';
+        if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return send(res, 400, { error: 'hash must be a 0x-prefixed transaction hash.' });
+        return send(res, 200, await ctx.executor.txStatus(hash as `0x${string}`));
+      }
+      if (req.method === 'GET' && path === '/api/tx/pending') {
+        return send(res, 200, { pending: ctx.executor.pendingTxs() });
+      }
+      if (req.method === 'GET' && path === '/api/compliance') {
+        const range = z
+          .object({ from: z.string().datetime().optional(), to: z.string().datetime().optional() })
+          .safeParse({ from: url.searchParams.get('from') ?? undefined, to: url.searchParams.get('to') ?? undefined });
+        if (!range.success) return send(res, 400, { error: 'from/to must be ISO timestamps.' });
+        const report = buildComplianceReport(ctx.audit.read(), {
+          chain: { name: ctx.clients.chain.name, id: ctx.clients.chain.id },
+          wallet: ctx.clients.account?.address ?? null,
+          policySha256: integrity.status().hash,
+          integrity: ctx.audit.verify(),
+          ...range.data,
+        });
+        ctx.audit.append('access', { event: 'compliance_export', user: user!.username });
+        res.writeHead(200, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          'content-disposition': 'attachment; filename="agentvault-compliance.json"',
+        });
+        return res.end(stringify(report));
+      }
+      if (req.method === 'POST' && (path === '/api/batch' || path === '/api/batch/preview')) {
+        const parsed = BatchSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { transfers: [...] }.' });
+        const lines = parseBatch(parsed.data.transfers, ctx.policy);
+        if ('error' in lines) return send(res, 400, { error: lines.error });
+        if (path === '/api/batch/preview') {
+          const preview = await ctx.executor.previewBatch(lines.intents);
+          return send(res, 200, {
+            lines: preview.map((l) => ({ line: l.index + 1, intent: l.intent, tier: l.decision.tier, reasons: l.decision.reasons })),
+            allowed: preview.every((l) => l.decision.tier !== 'T3_DENY'),
+          });
+        }
+        const r = await ctx.executor.executeBatch(lines.intents);
+        return send(res, 200, {
+          lines: r.preview.map((l) => ({ line: l.index + 1, tier: l.decision.tier, reasons: l.decision.reasons })),
+          results: r.results.map((x) => ({ status: x.status, tier: x.decision.tier, txHash: x.txHash, explorerUrl: x.explorerUrl, error: x.error })),
+          ...(r.stoppedAt !== undefined ? { stoppedAtLine: r.stoppedAt + 1 } : {}),
+        });
       }
       if (req.method === 'POST' && (path === '/api/preview' || path === '/api/transact')) {
         const parsed = TransactSchema.safeParse(await readBody(req));
@@ -545,8 +793,13 @@ export function createServer(opts: WebServerOptions): Server {
           return send(res, 400, { error: 'Invalid intent', issues: intent.error.issues.map((i) => i.message) });
         }
         if (path === '/api/preview') {
-          const d = await ctx.executor.preview(intent.data);
-          return send(res, 200, { tier: d.tier, reasons: d.reasons });
+          const { decision: d, alternative } = await ctx.executor.previewWithAlternative(intent.data);
+          return send(res, 200, {
+            tier: d.tier,
+            reasons: d.reasons,
+            explanation: explainTier(d.tier),
+            ...(alternative ? { alternative: alternative.kind === 'amount' ? { available: true, intent: alternative.intent, tier: alternative.decision.tier, note: alternative.note } : { available: false, note: alternative.note } } : {}),
+          });
         }
         const r = await ctx.executor.execute(intent.data);
         return send(res, 200, {
@@ -567,8 +820,15 @@ export function createServer(opts: WebServerOptions): Server {
         const key = `${user!.username}:${session}`;
         const history = chats.get(key) ?? [];
         const events: string[] = [];
-        const answer = await chatTurn(env, ctx, history, parsed.data.message, (e) => events.push(e));
-        chats.set(key, history);
+        let answer: string;
+        try {
+          answer = await chatTurn(env, ctx, history, parsed.data.message, (e) => events.push(e));
+        } catch (err) {
+          // The model being down is a 503 the UI can retry, not a server crash.
+          rememberChat(key, history);
+          return send(res, 503, { error: redactText(err instanceof Error ? err.message : String(err)), session });
+        }
+        rememberChat(key, history);
         return send(res, 200, { session, answer, events });
       }
 
@@ -594,7 +854,7 @@ export function createServer(opts: WebServerOptions): Server {
       if (message === 'request body too large' || message === 'request body is not valid JSON') {
         return send(res, 400, { error: message });
       }
-      return send(res, 500, { error: message });
+      return send(res, 500, { error: redactText(message) });
     }
   });
 }

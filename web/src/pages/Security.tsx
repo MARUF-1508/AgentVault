@@ -148,6 +148,16 @@ export default function Security() {
               <span className="muted small">
                 sha256 of <code>config/policy.json</code> as loaded by the server. If this hash changes, the limits changed — compare it against the audit trail.
               </span>
+              {status.policyIntegrity && (
+                <span className="row integrity-row">
+                  <span className={`badge ${status.policyIntegrity.drift ? 'bad' : 'ok'}`}>
+                    {status.policyIntegrity.drift ? 'File changed outside the app' : 'Matches what the server loaded'}
+                  </span>
+                  <span className={`badge ${status.policyIntegrity.pinned ? (status.policyIntegrity.matchesPin ? 'ok' : 'bad') : ''}`}>
+                    {status.policyIntegrity.pinned ? (status.policyIntegrity.matchesPin ? 'Pinned hash matches' : 'Pinned hash MISMATCH') : 'Not pinned (set POLICY_SHA256)'}
+                  </span>
+                </span>
+              )}
             </p>
           ) : (
             <p className="muted">Policy file hash unavailable.</p>

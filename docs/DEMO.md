@@ -125,3 +125,13 @@ Then demo the UI read-only: dashboard, Security fingerprint, Activity export.
 | Chat does nothing | `LLM_API_KEY` missing — use Transfer page preview instead |
 | Port already in use | `fuser -k 5174/tcp` or `npm run cli -- serve --port 6001` |
 | Approval card expired | Approvals auto-reject after 2 minutes; resubmit |
+
+## Extra beats from the final upgrade (pick any, 20 s each)
+
+- **Compliant alternative, from the engine**: Transfer page → amount `1` to `alice` → *Check tier*. T3, and below it "Compliant alternative: 0.005 ETH … (T2)" with a **Use 0.005 ETH** button. CLI: `npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1`.
+- **Chinese**: in the Agent chat type `给 alice 转 0.0001 ETH` — the agent resolves alice, previews (T1) and answers in Chinese.
+- **Batch that cannot sneak past the limits**: Transfer page → Batch card → three lines of `alice 0.004` → *Check batch*. Line 1 is T2, lines 2–3 are refused by the velocity guard, and nothing would be sent.
+- **Decoded approval card**: any T2 shows a `Call` line decoded from the exact bytes to be signed, e.g. `ERC-20.transfer(0x…, 2000000)`.
+- **Audit on-chain**: `npm run cli -- audit anchor` then `npm run cli -- audit verify --onchain` → `entry #N matches the on-chain anchor`. Edit a line in `data/audit.jsonl` and run it again to see it fail.
+- **Network resilience**: the top-bar pill shows chain + block; stop the network and a banner explains what still works, with *Retry*.
+- **Accessibility**: Tab once → *Skip to main content*; Ctrl+K palette, Esc closes; every page passes axe WCAG 2.2 AA in CI.

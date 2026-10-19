@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import type OpenAI from 'openai';
@@ -6,21 +6,28 @@ import { erc20Abi, parseUnits } from 'viem';
 import { chatTurn } from './agent/agent.js';
 import { runTool, type ToolContext } from './agent/tools.js';
 import { CliApprover, WebApprover } from './approval/approver.js';
+import { EmailApprover, linkSecret, smtpSender } from './approval/email.js';
+import { TelegramApprover } from './approval/telegram.js';
 import { ROLES, type Role } from './auth/rbac.js';
 import { UserStore } from './auth/users.js';
+import { verifyAnchors } from './audit/anchor.js';
 import { AuditLog } from './audit/log.js';
 import { makeClients } from './chain/client.js';
 import { loadEnv, loadPolicy } from './config.js';
+import { parseBatch } from './executor/batch.js';
 import { Executor } from './executor/executor.js';
+import { explainTier } from './policy/alternative.js';
 import { tokenInfo } from './policy/engine.js';
 import { addDenied, addRecipient, removeDenied, removeRecipient, writePolicyAtomic } from './policy/edit.js';
+import { policyFileHash } from './policy/integrity.js';
 import { pauseWallet, resumeWallet } from './policy/killswitch.js';
 import { IntentSchema, type Intent } from './policy/types.js';
 import { loadSchedules, type Schedules } from './schedule/rules.js';
 import { createServer } from './web/server.js';
+import { Scheduler } from './schedule/background.js';
 import { runDueRules } from './schedule/runner.js';
 
-const USAGE = `Agent Wallet
+const USAGE = `Agent Vault
 
   npm run cli -- info                              wallet address, chain, balance
   npm run cli -- portfolio                         balances with USD value
@@ -35,8 +42,13 @@ const USAGE = `Agent Wallet
                                                    read-only: "what would happen if ...?"
   npm run cli -- schedule [list|run]               scheduled / conditional rules
   npm run cli -- x402 [url]                        fetch a paid (x402-style) API resource; the wallet pays if it gets a 402
+  npm run cli -- batch <file.json> [--dry-run]     several transfers, all policy-checked together first
+  npm run cli -- tx <hash> | pending               status of a sent transaction / all unconfirmed ones
   npm run cli -- pause | resume                    kill switch
   npm run cli -- audit [verify|tail]               audit log
+  npm run cli -- audit anchor                      commit the audit head hash on-chain (zero-value self tx)
+  npm run cli -- audit verify --onchain [tx…]      check the log against its on-chain anchors
+  npm run cli -- policy hash                       sha256 of the policy file (pin it as POLICY_SHA256)
   npm run cli -- serve [--port N]                  web UI (loopback only, sign-in required)
   npm run cli -- user add <name> <owner|operator|viewer>   create a web-UI account (prints its password)
   npm run cli -- user list | remove <name>         manage web-UI accounts
@@ -52,7 +64,12 @@ async function main() {
   if (!cmd || cmd === 'help' || cmd === '--help') return void console.log(USAGE);
 
   const env = loadEnv();
-  const policy = loadPolicy(env.POLICY_FILE);
+  if (cmd === 'policy' && (rest[0] === 'hash' || !rest[0])) {
+    // Prints the value to pin as POLICY_SHA256 (S4). Deliberately before
+    // loadPolicy, so it also works when the current pin no longer matches.
+    return void console.log(policyFileHash(env.POLICY_FILE));
+  }
+  const policy = loadPolicy(env.POLICY_FILE, env.POLICY_SHA256);
   const audit = new AuditLog(env.AUDIT_LOG);
 
   // Commands that need no chain connection
@@ -66,7 +83,7 @@ async function main() {
   }
   if (cmd === 'user' || cmd === 'users') return userCommand(new UserStore(env.USERS_FILE), rest);
   if (cmd === 'recipient' || cmd === 'deny') return recipientCommand(env, policy, audit, [cmd, ...rest]);
-  if (cmd === 'audit') {
+  if (cmd === 'audit' && rest[0] !== 'anchor' && !rest.includes('--onchain')) {
     if (rest[0] === 'verify') {
       const v = audit.verify();
       return void console.log(v.ok ? '✅ Audit log intact.' : `❌ Audit log tampered at entry ${v.brokenAt}: ${v.reason}`);
@@ -94,7 +111,45 @@ async function main() {
       // The UI shows a first-run setup screen; the CLI path also works.
       console.log('No web accounts yet. Create the first owner in the UI, or run `npm run cli -- user add <name> owner`.');
     }
-    const server = createServer({ env, ctx: webCtx, approver, vault, users });
+    // Compliance: record which exact policy this server enforces (S4).
+    audit.append('access', { event: 'policy_loaded', by: 'serve', policyHash: policyFileHash(env.POLICY_FILE), pinned: Boolean(env.POLICY_SHA256) });
+
+    // Optional out-of-band approvals (I4).
+    if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
+      const telegram = new TelegramApprover(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, approver, audit);
+      approver.addNotifier(telegram);
+      telegram.start();
+      console.log('Telegram approvals on: T2 requests are also posted to the configured chat.');
+    }
+
+    // Optional email approvals (I4): signed links bound to the request id.
+    let emailLinks: { secret: string } | undefined;
+    if (env.SMTP_URL && env.APPROVAL_EMAIL_TO && env.APPROVAL_EMAIL_FROM) {
+      emailLinks = { secret: linkSecret(env.APPROVAL_LINK_SECRET) };
+      approver.addNotifier(
+        new EmailApprover({
+          send: await smtpSender(env.SMTP_URL),
+          from: env.APPROVAL_EMAIL_FROM,
+          to: env.APPROVAL_EMAIL_TO,
+          baseUrl: env.PUBLIC_BASE_URL ?? `http://127.0.0.1:${port}`,
+          secret: emailLinks.secret,
+          audit,
+        }),
+      );
+      console.log('Email approvals on: T2 requests are also mailed with signed approve/reject links.');
+    }
+
+    // Background schedules (T5): opt-in, every rule still goes through the executor.
+    const scheduler = new Scheduler(
+      () => ({ clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) }),
+      env.SCHEDULER_INTERVAL_SEC,
+    );
+    if (env.SCHEDULER === 'true') {
+      scheduler.start();
+      console.log(`Scheduler on: enabled rules are checked every ${env.SCHEDULER_INTERVAL_SEC} s.`);
+    }
+
+    const server = createServer({ env, ctx: webCtx, approver, vault, users, scheduler: scheduler.status, ...(emailLinks ? { emailLinks } : {}) });
     await new Promise<void>((resolve) => server.listen(port, env.WEB_HOST, resolve));
     const where = env.WEB_HOST === '127.0.0.1' ? 'loopback only, sign-in required; do not expose' : `bound to ${env.WEB_HOST}`;
     return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (${where}).`);
@@ -129,7 +184,10 @@ async function main() {
     case 'send': {
       const [to, amount, token] = args;
       const intent = parseIntent(token ? { kind: 'erc20_transfer', to, amount, token } : { kind: 'native_transfer', to, amount });
-      if (cmd === 'preview') return print(await executor.preview(intent));
+      if (cmd === 'preview') {
+        const { decision, alternative } = await executor.previewWithAlternative(intent);
+        return print({ ...decision, explanation: explainTier(decision.tier), ...(alternative ? { alternative } : {}) });
+      }
       return print(await executor.execute(intent, { dryRun, task, taskMax }));
     }
     case 'approve': {
@@ -156,6 +214,20 @@ async function main() {
     }
     case 'x402':
       return print(await runTool('fetch_paid_data', JSON.stringify({ url: args[0] ?? env.X402_API_URL }), ctx));
+    case 'tx': {
+      if (!/^0x[0-9a-fA-F]{64}$/.test(args[0] ?? '')) {
+        console.error('Usage: tx <0x… transaction hash>');
+        process.exitCode = 1;
+        return;
+      }
+      return print(await executor.txStatus(args[0] as `0x${string}`));
+    }
+    case 'pending':
+      return print(executor.pendingTxs());
+    case 'batch':
+      return cmdBatch(args[0], dryRun, executor, policy);
+    case 'audit':
+      return cmdAuditOnchain(args, dryRun, ctx);
     case 'chat':
       return chat(env, ctx);
     default:
@@ -339,9 +411,67 @@ async function cmdWhatIf(args: string[], ctx: ToolContext) {
   return print(result);
 }
 
+/**
+ * `batch <file.json>`: a JSON array of `{ "to": "<0x… or saved name>", "amount": "0.0001", "token"?: "USDC" }`.
+ * The whole batch is policy-checked first with each line counting toward the
+ * next, and nothing is sent unless every line passes (T3).
+ */
+async function cmdBatch(file: string | undefined, dryRun: boolean, executor: Executor, policy: ReturnType<typeof loadPolicy>) {
+  if (!file || !existsSync(file)) {
+    console.error('Usage: batch <file.json> [--dry-run]   (a JSON array of { to, amount, token? })');
+    process.exitCode = 1;
+    return;
+  }
+  const lines = parseBatch(JSON.parse(readFileSync(file, 'utf8')), policy);
+  if ('error' in lines) {
+    console.error(lines.error);
+    process.exitCode = 1;
+    return;
+  }
+  const r = await executor.executeBatch(lines.intents, { dryRun });
+  return print({
+    preview: r.preview.map((l) => ({ line: l.index + 1, tier: l.decision.tier, reasons: l.decision.reasons })),
+    results: r.results.map((x) => ({ status: x.status, tier: x.decision.tier, txHash: x.txHash, error: x.error })),
+    ...(r.stoppedAt !== undefined ? { stoppedAt: r.stoppedAt + 1 } : {}),
+  });
+}
+
+/**
+ * `audit anchor`: commit the current head hash on-chain (S2) as a zero-value
+ * self-transaction, through the executor like every other state change.
+ * `audit verify --onchain [txHash …]`: local hash chain plus every anchor.
+ */
+async function cmdAuditOnchain(args: string[], dryRun: boolean, ctx: ToolContext) {
+  const { audit, executor, clients } = ctx;
+  if (args[0] === 'anchor') {
+    const head = audit.read().at(-1);
+    if (!head) return print({ error: 'The audit log is empty; nothing to anchor.' });
+    const r = await executor.execute({ kind: 'audit_anchor', seq: head.seq, headHash: head.hash }, { dryRun });
+    if (r.status === 'executed' && r.txHash) {
+      audit.append('anchor', { seq: head.seq, headHash: head.hash, txHash: r.txHash, explorerUrl: r.explorerUrl });
+    }
+    return print({ status: r.status, anchoredSeq: head.seq, headHash: head.hash, txHash: r.txHash, explorerUrl: r.explorerUrl, error: r.error, reasons: r.decision.reasons });
+  }
+  const local = audit.verify();
+  const explicit = args.filter((a) => /^0x[0-9a-fA-F]{64}$/.test(a));
+  const onchain = await verifyAnchors(
+    audit.read(),
+    async (hash) => {
+      const tx = await clients.publicClient.getTransaction({ hash });
+      return tx ? { input: tx.input, from: tx.from, to: tx.to } : null;
+    },
+    { wallet: clients.account?.address, ...(explicit.length ? { txHashes: explicit } : {}) },
+  );
+  if (onchain.checks.length === 0) {
+    return print({ local, onchain: { ok: false, checks: [], note: 'No anchors yet. Run `npm run cli -- audit anchor` first.' } });
+  }
+  if (!local.ok || !onchain.ok) process.exitCode = 1;
+  return print({ local, onchain });
+}
+
 async function chat(env: ReturnType<typeof loadEnv>, ctx: ToolContext) {
   const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-  console.log(`Agent Wallet on ${ctx.clients.chain.name}. Type "exit" to quit.`);
+  console.log(`Agent Vault on ${ctx.clients.chain.name}. Type "exit" to quit.`);
   while (true) {
     // A fresh readline per turn so the approval prompt can take over stdin cleanly.
     const rl = createInterface({ input: stdin, output: stdout });

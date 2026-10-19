@@ -59,7 +59,13 @@ function stubCtx(executor: Partial<Executor>): { ctx: ToolContext; approver: Web
     publicClient: {},
     account: { address: '0x1111111111111111111111111111111111111111' },
   } as unknown as ToolContext['clients'];
-  const ctx = { clients, policy, executor: executor as Executor, audit } as ToolContext;
+  // Defaults for the executor methods these tests do not care about.
+  const full: Partial<Executor> = {
+    pendingTxs: () => [],
+    previewWithAlternative: (async (intent: never) => ({ decision: await executor.preview!(intent) })) as never,
+    ...executor,
+  };
+  const ctx = { clients, policy, executor: full as Executor, audit } as ToolContext;
   return { ctx, approver };
 }
 
@@ -233,13 +239,22 @@ describe('web server', () => {
   });
 
   it('reports no pending approval and rejects decide with nothing waiting', async () => {
-    expect(await (await authed(`${base}/api/pending`)).json()).toEqual({ pending: null, expiresAt: null });
+    expect(await (await authed(`${base}/api/pending`)).json()).toEqual({ pending: null, expiresAt: null, id: null });
     const r = await authed(`${base}/api/decide`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approved: true, id: '00000000-0000-4000-8000-000000000000' }),
+    });
+    expect(await r.json()).toEqual({ decided: false });
+  });
+
+  it('refuses a decision that does not name the request it answers', async () => {
+    const noId = await authed(`${base}/api/decide`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ approved: true }),
     });
-    expect(await r.json()).toEqual({ decided: false });
+    expect(noId.status).toBe(400);
   });
 
   it('rejects invalid bodies (bad intent, non-boolean approval, bad JSON)', async () => {
@@ -289,17 +304,28 @@ describe('web server', () => {
     }
     expect(pending.pending).toContain('T2_CONFIRM');
     expect((pending as { expiresAt?: number }).expiresAt).toBeGreaterThan(Date.now());
+    const id = (pending as { id?: string }).id;
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    // An answer meant for an older request must not decide this one (TOCTOU guard).
+    const stale = await (
+      await authed(`${base}/api/decide`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ approved: true, id: '00000000-0000-4000-8000-000000000000' }),
+      })
+    ).json();
+    expect(stale).toEqual({ decided: false });
     const decided = await (
       await authed(`${base}/api/decide`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ approved: false }),
+        body: JSON.stringify({ approved: false, id }),
       })
     ).json();
     expect(decided).toEqual({ decided: true });
     expect(appends).toContainEqual({ type: 'access', data: { event: 'decide', user: 'olivia', approved: false } });
     await expect(tx).resolves.toMatchObject({ status: 'rejected_by_human' });
-    expect(await (await authed(`${base}/api/pending`)).json()).toEqual({ pending: null, expiresAt: null });
+    expect(await (await authed(`${base}/api/pending`)).json()).toEqual({ pending: null, expiresAt: null, id: null });
   });
 
   // Recipient lists. Escalating directions (add a known recipient, un-deny one)

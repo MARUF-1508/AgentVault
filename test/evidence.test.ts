@@ -101,4 +101,21 @@ describe('renderEvidence', () => {
     expect(md).toContain('https://sepolia.basescan.org/address/0xV2');
     expect(md).toContain('https://sepolia.basescan.org/tx/0xsess');
   });
+
+  it('renders an on-chain audit anchor as a zero-value row naming its entry', () => {
+    const md = renderEvidence(
+      [
+        {
+          seq: 9,
+          ts: '2026-10-19T10:00:00.000Z',
+          type: 'tx_sent',
+          data: { hash: `0x${'a'.repeat(64)}`, intent: { kind: 'audit_anchor', seq: 8, headHash: 'b'.repeat(64) }, tier: 'T1_AUTO', asset: 'ETH', explorerUrl: 'https://x' },
+          prevHash: '',
+          hash: '',
+        },
+      ],
+      { auditLogPath: 'data/audit.jsonl', chainIntegrity: { ok: true } },
+    );
+    expect(md).toContain('| audit_anchor | 0 (audit entry #8) ETH | T1_AUTO |');
+  });
 });

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { redact } from './redact.js';
 
 export type AuditType =
   | 'intent'        // the agent asked for something
@@ -10,6 +11,8 @@ export type AuditType =
   | 'tx_sent'       // broadcast, with hash
   | 'tx_confirmed'  // mined, with receipt status
   | 'tx_failed'
+  | 'tx_pending'    // broadcast, receipt not seen in time (still counts to budget)
+  | 'anchor'        // audit head committed on-chain (S2)
   | 'schedule'      // a scheduled/conditional rule fired
   | 'kill_switch'
   | 'access';       // web-UI sign-in, approval or pause by a named user
@@ -59,7 +62,8 @@ export class AuditLog {
       seq: (last?.seq ?? -1) + 1,
       ts: this.now().toISOString(),
       type,
-      data: JSON.parse(stringify(data)) as Record<string, unknown>,
+      // Secrets never reach the file, even if an error message echoes one (S8).
+      data: JSON.parse(stringify(redact(data))) as Record<string, unknown>,
       prevHash: last?.hash ?? GENESIS,
     };
     const entry: AuditEntry = { ...base, hash: hashEntry(base) };

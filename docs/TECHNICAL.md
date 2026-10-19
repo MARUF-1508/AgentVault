@@ -76,13 +76,24 @@ Stretch: payments route through AgentVault.sol, which re-enforces caps on-chain.
 
 ## 2. Core algorithm: policy evaluation order
 
+> Compliant alternatives: `src/policy/alternative.ts` runs *after* a T2/T3
+> verdict. It computes every amount ceiling the policy imposes (hard cap, budget
+> left, task envelope, velocity share, anomaly share), takes the minimum (or the
+> auto limit for a known recipient's T2), and re-runs `evaluate()` on that amount.
+> Only a candidate the engine itself accepts with a better tier is offered.
+
 `evaluate()` is intentionally ordered from cheapest global kill-switches to
 per-recipient judgement. The first matching rule wins; evaluation is total
 (every intent gets exactly one tier with reasons).
 
 1. **Kill switch** — `state.paused` → T3.
 2. **Chain** — connected `chainId !== policy.chainId` → T3.
-3. **Rate limit** — `txLastHour >= maxTxPerHour` → T3.
+3. **Rate limit** — `txLastHour >= maxTxPerHour` → T3. **Velocity guard**
+   (optional `rateLimit.velocity`) — `maxTx` transactions already inside the
+   rolling window → T3; later, after the daily budget, a spend that would push
+   the window past `maxSpendPct`% of the daily budget → T3. The window's
+   numbers come from the audit log plus in-flight reservations.
+   An `audit_anchor` intent (zero value, to the wallet itself) is T1 here.
 4. **Asset resolution** — unknown token → T3 (deny by default).
 5. **Amount parsing** — `parseUnits` failure or `<= 0` → T3. Amounts are
    human-readable decimal strings at the edges, `bigint` base units inside;
