@@ -370,21 +370,22 @@ function Shell() {
           </p>
         )}
 
-        <AnimatePresence mode="wait">
-          <motion.main
-            key={location.pathname}
-            ref={mainRef}
-            id="main"
-            tabIndex={-1}
-            className="page"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-          >
-            {outlet}
-          </motion.main>
-        </AnimatePresence>
+        {/* Enter-only page transition. An exit animation (AnimatePresence
+            mode="wait") could get stuck when the route changed while the
+            current page was still animating in, leaving the old page on
+            screen after the URL had changed. */}
+        <motion.main
+          key={location.pathname}
+          ref={mainRef}
+          id="main"
+          tabIndex={-1}
+          className="page"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+        >
+          {outlet}
+        </motion.main>
       </div>
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
