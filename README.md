@@ -46,9 +46,26 @@ by re-running the engine, or why there is none ("budget resets at 00:00 UTC").
 
 ## Screenshots
 
-| Dashboard (dark) | Transfer: T3 refusal with the engine's compliant alternative (light) |
+| Dashboard (dark theme, real Base Sepolia balances) | Transfer: T3 refusal with the engine's compliant alternative (light) |
 |---|---|
 | ![Dashboard in the dark theme](docs/screenshots/dashboard-dark.png) | ![Transfer page showing a T3 refusal and a compliant alternative](docs/screenshots/transfer-alternative-light.png) |
+
+| Security: tiers, live limits, roles and the policy fingerprint (dark) | Activity filtered to on-chain entries (light) |
+|---|---|
+| ![Security page with tiers, limits, roles and the policy fingerprint](docs/screenshots/security-dark.png) | ![Activity page filtered to on-chain entries](docs/screenshots/activity-light.png) |
+
+### The policy firewall in action
+
+A T1 inside the limits executes with no prompt; the same form then raises the
+amount until the engine refuses (T3) and offers the largest amount it would
+accept.
+
+![Checking a transfer's tier, then the T3 refusal and compliant alternative](docs/screenshots/tier-check.gif)
+
+A T2 request for an allowlisted recipient above the auto limit becomes a human
+approval card with a countdown. Here it is rejected, so nothing is signed.
+
+![A T2 request waiting for a human, then rejected, so nothing is signed](docs/screenshots/approval-flow.gif)
 
 ## 60-second quickstart (no keys)
 
