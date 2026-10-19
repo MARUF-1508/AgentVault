@@ -107,7 +107,8 @@ export default function ChatPanel() {
   const mic = useSpeechInput((text) => void send(text, true));
 
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: reduce ? 'auto' : 'smooth' });
   }, [msgs, busy]);
 
   const onSubmit = (e: FormEvent) => {
