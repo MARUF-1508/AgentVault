@@ -91,7 +91,12 @@ function detail(e: ActivityEntry, explorer: string | null): ReactNode {
       switch (d.event) {
         case 'decide':
           if (d.channel === 'telegram' && d.ok === false) return 'ignored a Telegram button press (wrong chat or stale request)';
-          return `${who} ${d.approved ? 'approved' : 'rejected'} a T2 request${d.channel === 'telegram' ? ' via Telegram' : ''}`;
+          if (d.channel === 'email' && d.ok === false) return `refused an email approval link${d.reason ? ` (${String(d.reason)})` : ' (request no longer waiting)'}`;
+          return `${who} ${d.approved ? 'approved' : 'rejected'} a T2 request${d.channel === 'telegram' ? ' via Telegram' : d.channel === 'email' ? ' via an email link' : ''}`;
+        case 'approval_emailed':
+          return 'approval request emailed to the owner';
+        case 'approval_email_failed':
+          return 'could not email the approval request (web approval still works)';
         case 'contact_added':
           return `${who} added ${String(d.label ?? 'a contact')} to the address book`;
         case 'contact_removed':

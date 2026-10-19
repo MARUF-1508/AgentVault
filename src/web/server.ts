@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { chatTurn } from '../agent/agent.js';
 import { runTool, type ToolContext } from '../agent/tools.js';
 import type { WebApprover } from '../approval/approver.js';
+import { EmailApprover, verifyLink } from '../approval/email.js';
 import { redactText } from '../audit/redact.js';
 import { can, permissionsOf, ROLES, type Permission } from '../auth/rbac.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from '../auth/totp.js';
@@ -38,6 +39,8 @@ export interface WebServerOptions {
   sessions?: Sessions;
   /** Background scheduler state (T5), shown on /api/status when it runs. */
   scheduler?: SchedulerStatus;
+  /** Signed email approval links (I4); absent = the link routes answer 404. */
+  emailLinks?: { secret: string };
   /** Override the per-user API limits (tests). */
   rateLimits?: ConstructorParameters<typeof RateLimiter>[0];
 }
@@ -179,6 +182,9 @@ function hostnameOf(value: string | undefined, withScheme: boolean): string | nu
  * trigger a transaction. Every /api route beyond login and first-run setup then
  * still requires a signed-in session (see ROUTES).
  */
+/** The one route that accepts an HTML form post: the email-link confirmation button. */
+const FORM_ROUTE = '/api/approve-link';
+
 function rejectForeign(req: IncomingMessage): { status: number; error: string } | null {
   const host = hostnameOf(req.headers.host, false);
   if (!host || !LOOPBACK.has(host)) return { status: 403, error: 'Host must be loopback.' };
@@ -191,8 +197,16 @@ function rejectForeign(req: IncomingMessage): { status: number; error: string } 
   if (req.headers['sec-fetch-site'] === 'cross-site') {
     return { status: 403, error: 'Cross-site requests are refused.' };
   }
-  if (req.method === 'POST' && !(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+  const type = (req.headers['content-type'] ?? '').toLowerCase();
+  // The email confirmation page posts a plain form to itself. It still has to
+  // come from a loopback Origin (checked above) and carry a valid signed link;
+  // every other POST must be JSON.
+  const formPost = new URL(req.url ?? '/', 'http://localhost').pathname === FORM_ROUTE && type.startsWith('application/x-www-form-urlencoded');
+  if (req.method === 'POST' && !type.startsWith('application/json') && !formPost) {
     return { status: 415, error: 'POST bodies must be application/json.' };
+  }
+  if (formPost && req.headers.origin === undefined) {
+    return { status: 403, error: 'The confirmation must be sent from the Agent Vault page.' };
   }
   return null;
 }
@@ -220,6 +234,32 @@ function readBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on('error', reject);
   });
+}
+
+function readForm(req: IncomingMessage): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (c: Buffer) => {
+      body += c.toString('utf8');
+      if (body.length > 10_000) {
+        reject(new Error('request body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(Object.fromEntries(new URLSearchParams(body))));
+    req.on('error', reject);
+  });
+}
+
+const escapeHtml = (v: string) =>
+  v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** A minimal, script-free page for the email-link flow (the CSP forbids inline script anyway). */
+function sendPage(res: ServerResponse, status: number, title: string, body: string): void {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)} · Agent Vault</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 16px;color:#0b1736;background:#f3f7ff}pre{white-space:pre-wrap;background:#fff;border:1px solid #cddbf7;border-radius:10px;padding:12px}button{font:inherit;font-weight:600;padding:.6rem 1.1rem;border-radius:10px;border:0;color:#fff;cursor:pointer}.approve{background:#065f46}.reject{background:#b91c1c}button:focus-visible{outline:3px solid #1d4ed8;outline-offset:2px}</style></head>
+<body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`);
 }
 
 const STATIC_TYPES: Record<string, string> = {
@@ -301,6 +341,37 @@ export function createServer(opts: WebServerOptions): Server {
       const path = url.pathname;
       const foreign = rejectForeign(req);
       if (foreign) return send(res, foreign.status, { error: foreign.error });
+
+      // Email approval links (I4). Signature-authenticated, not session-based:
+      // the link itself is the capability, bound to one request id and its
+      // deadline. GET only shows a confirmation page (mail scanners prefetch
+      // links); the POST from that page's button is what decides.
+      if (path === FORM_ROUTE) {
+        if (!opts.emailLinks) return send(res, 404, { error: 'Email approvals are not configured.' });
+        if (req.method === 'GET') {
+          const raw = Object.fromEntries(url.searchParams);
+          const v = verifyLink(opts.emailLinks.secret, raw);
+          const pending = approver.getPendingDetail();
+          if (!v.ok || !pending || pending.id !== v.link.id) {
+            return sendPage(res, 410, 'Link not usable', `<p>${escapeHtml(v.ok ? 'This request is no longer waiting.' : `This link cannot be used (${v.reason}).`)} Nothing was signed.</p>`);
+          }
+          const approve = v.link.action === 'approve';
+          const hidden = ['id', 'action', 'exp', 'sig']
+            .map((k) => `<input type="hidden" name="${k}" value="${escapeHtml(String(raw[k] ?? ''))}">`)
+            .join('');
+          return sendPage(
+            res,
+            200,
+            approve ? 'Approve this transaction?' : 'Reject this transaction?',
+            `<pre>${escapeHtml(pending.summary)}</pre><form method="post" action="${FORM_ROUTE}">${hidden}<button type="submit" class="${approve ? 'approve' : 'reject'}">${approve ? 'Approve and sign' : 'Reject'}</button></form><p>The policy is checked again before anything is signed. A refused (T3) request can never be approved.</p>`,
+          );
+        }
+        if (req.method === 'POST') {
+          const form = await readForm(req);
+          const r = EmailApprover.decideFromLink(approver, ctx.audit, opts.emailLinks.secret, form);
+          return sendPage(res, r.ok ? 200 : 410, r.ok ? 'Done' : 'Not applied', `<p>${escapeHtml(r.message)}</p>`);
+        }
+      }
 
       // Liveness/readiness probe (Docker HEALTHCHECK, uptime checks). No sign-in,
       // and nothing sensitive: chain, RPC reachability, block height, uptime.

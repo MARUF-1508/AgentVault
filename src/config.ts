@@ -33,6 +33,15 @@ const EnvSchema = z.object({
   // Telegram chat, with Approve/Reject buttons. Both must be set to enable it.
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().regex(/^-?\d+$/, 'TELEGRAM_CHAT_ID must be a numeric chat id').optional(),
+  // Optional email approver (I4): T2 requests are mailed with signed one-time
+  // approve/reject links. SMTP_URL is e.g. smtps://user:pass@smtp.example.com:465.
+  SMTP_URL: z.string().regex(/^smtps?:\/\//, 'SMTP_URL must start with smtp:// or smtps://').optional(),
+  APPROVAL_EMAIL_TO: z.string().email().optional(),
+  APPROVAL_EMAIL_FROM: z.string().email().optional(),
+  // Signs the links (>= 32 chars). Unset: a random per-process secret, so links die with a restart.
+  APPROVAL_LINK_SECRET: z.string().min(32).optional(),
+  // Base URL the owner's browser uses to reach the UI, for the links. Defaults to the serve address.
+  PUBLIC_BASE_URL: z.string().url().optional(),
   // Run enabled schedules in the background while `serve` is up (T5).
   SCHEDULER: z.string().default('false'),
   SCHEDULER_INTERVAL_SEC: z.coerce.number().int().min(15).max(3600).default(60),
@@ -84,6 +93,8 @@ export function loadEnv(): Env {
   registerSecret(parsed.data.AGENT_PRIVATE_KEY);
   registerSecret(parsed.data.LLM_API_KEY);
   registerSecret(parsed.data.TELEGRAM_BOT_TOKEN);
+  registerSecret(parsed.data.SMTP_URL);
+  registerSecret(parsed.data.APPROVAL_LINK_SECRET);
   return parsed.data;
 }
 

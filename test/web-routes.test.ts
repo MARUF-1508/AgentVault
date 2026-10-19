@@ -63,6 +63,10 @@ describe('web routes added for the final upgrade', () => {
     expect(JSON.stringify(body)).not.toMatch(/0x1111/); // no wallet address
   });
 
+  it('the email-link route does not exist unless email approvals are configured', async () => {
+    expect((await call('/api/approve-link?id=x')).status).toBe(404);
+  });
+
   it('refuses a request a browser marks as cross-site, and sets a permissions policy', async () => {
     const r = await call('/api/status', { cookie: owner, headers: { 'sec-fetch-site': 'cross-site' } });
     expect(r.status).toBe(403);

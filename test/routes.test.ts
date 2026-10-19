@@ -28,6 +28,8 @@ const PRE_AUTH = new Set([
   '/api/auth/sessions/revoke',
   // Liveness probe: deliberately public, returns only chain/RPC reachability.
   '/api/health',
+  // Email approval links: authenticated by the signed link, not a session.
+  '/api/approve-link',
 ]);
 
 const source = readFileSync(new URL('../src/web/server.ts', import.meta.url), 'utf8');

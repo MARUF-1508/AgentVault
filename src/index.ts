@@ -6,6 +6,7 @@ import { erc20Abi, parseUnits } from 'viem';
 import { chatTurn } from './agent/agent.js';
 import { runTool, type ToolContext } from './agent/tools.js';
 import { CliApprover, WebApprover } from './approval/approver.js';
+import { EmailApprover, linkSecret, smtpSender } from './approval/email.js';
 import { TelegramApprover } from './approval/telegram.js';
 import { ROLES, type Role } from './auth/rbac.js';
 import { UserStore } from './auth/users.js';
@@ -121,6 +122,23 @@ async function main() {
       console.log('Telegram approvals on: T2 requests are also posted to the configured chat.');
     }
 
+    // Optional email approvals (I4): signed links bound to the request id.
+    let emailLinks: { secret: string } | undefined;
+    if (env.SMTP_URL && env.APPROVAL_EMAIL_TO && env.APPROVAL_EMAIL_FROM) {
+      emailLinks = { secret: linkSecret(env.APPROVAL_LINK_SECRET) };
+      approver.addNotifier(
+        new EmailApprover({
+          send: await smtpSender(env.SMTP_URL),
+          from: env.APPROVAL_EMAIL_FROM,
+          to: env.APPROVAL_EMAIL_TO,
+          baseUrl: env.PUBLIC_BASE_URL ?? `http://127.0.0.1:${port}`,
+          secret: emailLinks.secret,
+          audit,
+        }),
+      );
+      console.log('Email approvals on: T2 requests are also mailed with signed approve/reject links.');
+    }
+
     // Background schedules (T5): opt-in, every rule still goes through the executor.
     const scheduler = new Scheduler(
       () => ({ clients, policy, executor: webExecutor, audit, schedules: readSchedules(env.SCHEDULES_FILE) }),
@@ -131,7 +149,7 @@ async function main() {
       console.log(`Scheduler on: enabled rules are checked every ${env.SCHEDULER_INTERVAL_SEC} s.`);
     }
 
-    const server = createServer({ env, ctx: webCtx, approver, vault, users, scheduler: scheduler.status });
+    const server = createServer({ env, ctx: webCtx, approver, vault, users, scheduler: scheduler.status, ...(emailLinks ? { emailLinks } : {}) });
     await new Promise<void>((resolve) => server.listen(port, env.WEB_HOST, resolve));
     const where = env.WEB_HOST === '127.0.0.1' ? 'loopback only, sign-in required; do not expose' : `bound to ${env.WEB_HOST}`;
     return void console.log(`Agent Vault UI on http://127.0.0.1:${port} (${where}).`);
