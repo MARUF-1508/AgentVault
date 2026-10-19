@@ -25,19 +25,23 @@ export default function Transfer() {
         </div>
       </div>
       {can('preview') ? (
-        <div className="grid-side">
+        <>
+          {/* Outside the grid on purpose: as a direct grid child this banner
+              took the first column and pushed the form into the sidebar. */}
           {to && (
-            <p className="notice">
+            <p className="notice grid-note">
               Reviewing <span className="mono">{to}</span> from the Agent page. It is not a known recipient, so expect T2 and an approval step.
             </p>
           )}
-          <PolicyCheck key={`${to}-${amount}-${asset}`} initialTo={to} initialAmount={amount} initialAsset={asset} />
-          <section className="card">
-            <h2>Today's limits</h2>
-            <BudgetMeters budget={budget} />
-          </section>
-          <BatchCard />
-        </div>
+          <div className="grid-side">
+            <PolicyCheck key={`${to}-${amount}-${asset}`} initialTo={to} initialAmount={amount} initialAsset={asset} />
+            <section className="card">
+              <h2>Today's limits</h2>
+              <BudgetMeters budget={budget} />
+            </section>
+            <BatchCard />
+          </div>
+        </>
       ) : (
         <p className="notice">Your role ({me?.role}) is read-only. Ask an owner for operator access to preview or send.</p>
       )}

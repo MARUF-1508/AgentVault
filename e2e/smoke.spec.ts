@@ -58,6 +58,25 @@ test('previewing an allowlisted transfer shows T1 and sends nothing', async ({ p
   expect(await audit.text()).not.toContain('tx_sent');
 });
 
+test('an agent hand-off keeps the transfer form in the main column', async ({ page }) => {
+  await ensureSignedIn(page);
+
+  // Regression guard: the review banner used to be a direct grid child, so the
+  // form was pushed into the narrow sidebar column and the page looked empty.
+  await page.goto('/transfer?to=0x1111111111111111111111111111111111111111&amount=0.0001');
+  const note = page.locator('.notice', { hasText: /from the Agent page/i });
+  await expect(note).toBeVisible();
+  await expect(page.locator('.grid-side .notice')).toHaveCount(0);
+
+  const card = page.locator('.card', { hasText: 'Check and send' });
+  await expect(card).toBeVisible();
+  const box = await card.boundingBox();
+  expect(box, 'the transfer card is visible').not.toBeNull();
+  expect(box!.x, 'the transfer card sits in the main column').toBeLessThan(500);
+  const limits = page.locator('.card', { hasText: "Today's limits" });
+  expect((await limits.boundingBox())!.x, "the limits card sits in the sidebar column").toBeGreaterThan(box!.x + 300);
+});
+
 test('recipient lists give the label its own column and never overlap the button', async ({ page }) => {
   await ensureSignedIn(page);
 

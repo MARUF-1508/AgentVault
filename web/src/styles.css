@@ -157,6 +157,8 @@ p { margin: 0.4rem 0; }
 .badge.ok { color: var(--good); border-color: var(--good); background: var(--good-bg); }
 .badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
 .notice { padding: 0.65rem 0.85rem; border-radius: 10px; background: var(--warn-bg); border: 1px solid var(--warn); font-size: 0.875rem; }
+/* Banner directly above a .grid-side section. */
+.grid-note { margin: 0 0 1rem; }
 
 /* Controls */
 button, .btn { font: inherit; font-size: 0.875rem; font-weight: 550; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.5rem 0.95rem; border-radius: 10px; border: 1px solid transparent; background: linear-gradient(135deg, var(--btn-from), var(--btn-to)); color: var(--accent-text); cursor: pointer; text-decoration: none !important; transition: transform 0.12s, filter 0.15s, background-color 0.15s, box-shadow 0.15s; }
