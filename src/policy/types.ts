@@ -75,6 +75,13 @@ export const PolicySchema = z.object({
     /** label -> address. Known recipients can receive auto-tier transfers. */
     allowlist: z.record(z.string(), Address),
     denylist: z.array(Address),
+    /**
+     * Address book (T2): label -> address for people the owner pays sometimes.
+     * Lets the agent resolve "pay bob" to an address, but a contact is *not*
+     * trusted: sends to it are still T2 (human approval) unless it is also on
+     * the allowlist. Owner-managed; the LLM can only read it.
+     */
+    contacts: z.record(z.string(), Address).default({}),
   }),
   approvals: z.object({
     allowUnlimited: z.boolean(),
@@ -87,7 +94,22 @@ export const PolicySchema = z.object({
   prices: z.record(z.string(), PriceRules).default({}),
   /** Optional Day 3 risk controls (anomaly guard, block list, lookalikes, contracts). */
   risk: RiskRules.optional(),
-  rateLimit: z.object({ maxTxPerHour: z.number().int().positive() }),
+  rateLimit: z.object({
+    maxTxPerHour: z.number().int().positive(),
+    /**
+     * Optional velocity guard (S5): bounds bursts that the hourly count and the
+     * daily budget alone would allow, e.g. draining a whole day's budget in a
+     * minute. Within any rolling `windowMinutes`, at most `maxTx` transactions and
+     * at most `maxSpendPct`% of an asset's daily budget. Absent = off.
+     */
+    velocity: z
+      .object({
+        windowMinutes: z.number().int().min(1).max(1440),
+        maxTx: z.number().int().positive(),
+        maxSpendPct: z.number().min(1).max(100).default(100),
+      })
+      .optional(),
+  }),
 });
 
 export type Policy = z.infer<typeof PolicySchema>;
@@ -97,7 +119,13 @@ export type Intent =
   | { kind: 'native_transfer'; to: `0x${string}`; amount: string }
   | { kind: 'erc20_transfer'; token: string; to: `0x${string}`; amount: string }
   | { kind: 'erc20_approve'; token: string; spender: `0x${string}`; amount: string | 'unlimited' }
-  | { kind: 'swap'; tokenIn: string; tokenOut: string; amountIn: string; slippageBps: number; router?: `0x${string}` };
+  | { kind: 'swap'; tokenIn: string; tokenOut: string; amountIn: string; slippageBps: number; router?: `0x${string}` }
+  /**
+   * Commit the audit log's head hash on-chain (S2): a zero-value transaction to
+   * the wallet itself whose calldata carries the hash. Never offered to the LLM
+   * (not in ActionIntentSchema); only the CLI builds it.
+   */
+  | { kind: 'audit_anchor'; seq: number; headHash: string };
 
 const NativeTransferIntent = z.object({ kind: z.literal('native_transfer'), to: Address, amount: Decimal });
 const Erc20TransferIntent = z.object({ kind: z.literal('erc20_transfer'), token: z.string(), to: Address, amount: Decimal });
@@ -137,6 +165,12 @@ export const IntentSchema = z.discriminatedUnion('kind', [
   Erc20ApproveIntent,
   SwapIntent,
 ]);
+
+export const AuditAnchorIntentSchema = z.object({
+  kind: z.literal('audit_anchor'),
+  seq: z.number().int().min(0),
+  headHash: z.string().regex(/^[0-9a-f]{64}$/, 'sha256 hex'),
+});
 
 /**
  * Permission tiers.
@@ -185,6 +219,12 @@ export interface SpendState {
    * so the cap follows the task even across separate executions.
    */
   envelope?: { asset: string; budgetBase: bigint; spentBase: bigint };
+  /**
+   * Optional velocity input (S5): transactions broadcast, and spend per asset,
+   * inside the policy's rolling velocity window. Derived from the audit log by
+   * `spendStateFrom`; missing leaves the velocity guard off.
+   */
+  velocity?: { txInWindow: number; spentInWindow: Record<string, bigint> };
 }
 
 /**

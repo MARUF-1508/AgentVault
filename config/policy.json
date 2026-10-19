@@ -28,7 +28,8 @@
       "alice": "0x4785Dca37A242F3D80f844CB0b143A687008a2B5",
       "x402-marketplace": "0x4785Dca37A242F3D80f844CB0b143A687008a2B5"
     },
-    "denylist": ["0x000000000000000000000000000000000000dEaD"]
+    "denylist": ["0x000000000000000000000000000000000000dEaD"],
+    "contacts": {}
   },
   "approvals": {
     "allowUnlimited": false,
@@ -55,6 +56,7 @@
     "lookalike": { "enabled": true, "prefix": 4, "suffix": 4 }
   },
   "rateLimit": {
-    "maxTxPerHour": 10
+    "maxTxPerHour": 10,
+    "velocity": { "windowMinutes": 10, "maxTx": 5, "maxSpendPct": 50 }
   }
 }
