@@ -18,6 +18,9 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:8931',
     trace: 'retain-on-failure',
+    // The app honours prefers-reduced-motion; with it on, nothing is mid-animation
+    // when a test measures or scrolls, which keeps slow CI runners deterministic.
+    reducedMotion: 'reduce',
     // PW_CHANNEL=msedge (or chrome) runs against an installed browser when the
     // Playwright download is not available; CI installs Chromium instead.
     ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}),
