@@ -165,7 +165,8 @@ exact verification results are in `docs/FINAL_STATUS.md`.
 - [x] I2 English + Simplified Chinese replies.
 - [x] I4 Telegram approver (opt-in).
 - [x] I4 email approver (opt-in): signed one-time links bound to the request id, confirmation page before deciding (`src/approval/email.ts`).
-- [ ] B2 ERC-4337 session key: not done, documented as future work. AgentVaultV2 session keys remain the on-chain answer.
+- [x] B2 ERC-4337 session key: `contracts/SessionKeyAccount.sol` (EntryPoint v0.7) + `src/aa/userop.ts`, Foundry and vitest tests.
+- [ ] B2 live deployment through a bundler (needs the funded key).
 - [x] Security: approval ids (TOCTOU), per-user rate limits, Fetch Metadata check, no-store, permissions policy, bounded chat memory, LLM retries.
 - [x] Wallet UX: network indicator, RPC-down banner with retry, RPC fallback transport, `/api/health`.
 - [x] WCAG 2.2 AA: skip link, focus traps, live regions, contrast fixes; axe-core e2e over every page in both themes.

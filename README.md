@@ -1,7 +1,7 @@
 # Agent Vault
 
 [![CI](https://github.com/MARUF-1508/AgentVault/actions/workflows/ci.yml/badge.svg)](https://github.com/MARUF-1508/AgentVault/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/unit%20tests-310%20passing-2563eb)
+![tests](https://img.shields.io/badge/unit%20tests-314%20passing-2563eb)
 ![WCAG 2.2 AA](https://img.shields.io/badge/WCAG%202.2-AA%20(axe%20in%20CI)-1d4ed8)
 ![testnet only](https://img.shields.io/badge/network-Base%20Sepolia%20testnet-0b1736)
 
@@ -42,6 +42,12 @@ Every T2/T3 answer explains its tier in one sentence and carries the engine's
 **compliant alternative**: the largest amount the same policy accepts, proven
 by re-running the engine, or why there is none ("budget resets at 00:00 UTC").
 
+## Screenshots
+
+| Dashboard (dark) | Transfer: T3 refusal with the engine's compliant alternative (light) |
+|---|---|
+| ![Dashboard in the dark theme](docs/screenshots/dashboard-dark.png) | ![Transfer page showing a T3 refusal and a compliant alternative](docs/screenshots/transfer-alternative-light.png) |
+
 ## What it can do
 
 | Area | Feature | Where |
@@ -71,7 +77,7 @@ by re-running the engine, or why there is none ("budget resets at 00:00 UTC").
 git clone <your-repo-url> agent-wallet
 cd agent-wallet
 npm install
-npm test            # 162 tests, no network needed
+npm test            # 314 tests, no network needed
 ```
 
 ### 2. Create the agent's testnet wallet
@@ -231,7 +237,7 @@ OpenAI-compatible LLM tier, Foundry, Vite.
 **Zero-key path (2 minutes, no wallet, no LLM key):**
 
 ```bash
-npm install && npm test                # 310 unit tests, offline
+npm install && npm test                # 314 unit tests, offline
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 0.0002   # T1 verdict, nothing sent
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1        # T3 verdict + reasons
 npm run cli -- audit verify             # tamper check (empty log reads intact)
@@ -249,7 +255,7 @@ address you control). All demo amounts are tiny on purpose. A ready-made
 | Criterion | Where |
 |---|---|
 | Task completion (40%) | `docs/DEMO.md` (working flow), `src/agent/`, `src/policy/`, `src/executor/`; live hashes in `docs/EXECUTION_EVIDENCE.md` |
-| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R23), `test/` (310 unit + 49 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
+| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R23), `test/` (314 unit + 69 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
 | Innovation & interaction (30%) | Engine-proven compliant alternatives, EN/中文 agent, batch payments, rebalancing planner, Telegram approvals, decoded-calldata approval card, on-chain audit anchors, WCAG 2.2 AA UI, denial-with-alternative UX, tier preview without LLM, counterfactual **what-if** simulator, **task budget envelope**, **stale-allowance cleanup**, voice chat, approval cards, policy fingerprint, explanation of every decision, x402 **v2** paid-data flow, agent-wallet skill (`AGENTS.md`, `.opencode/`) |
 | On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls; `AgentVaultV2.sol` session keys + ERC-20; vault-routing mode; x402 payment — with tx hashes in `docs/EXECUTION_EVIDENCE.md` |
 | Architecture / technical doc | `docs/TECHNICAL.md` |
@@ -298,8 +304,10 @@ scripts/                  keygen, evidence, x402 demo API
 foundry.toml              Foundry config (AgentVault tests + deploy)
 config/policy.json        limits, allowlists, swap router, prices, risk
 config/schedules.json     scheduled / conditional rules (user config)
-test/                     vitest unit tests (24 files, 232 tests)
-test/contracts/           Foundry tests: AgentVault 12 and AgentVaultV2 37 (incl. fuzzing)
+test/                     vitest unit tests (38 files, 314 tests)
+test/contracts/           Foundry tests: AgentVault 12, AgentVaultV2 37, SessionKeyAccount 20 (incl. fuzzing)
+contracts/SessionKeyAccount.sol  ERC-4337 (EntryPoint v0.7) account with scoped session keys
+src/aa/userop.ts          builds and signs v0.7 user operations for the session key
 e2e/                      Playwright smoke tests (real server + built UI)
 Dockerfile, docker-compose.yml  one-command container (loopback publish)
 docs/                     plan, technical doc, demo script, security self-assessment, evidence
@@ -365,9 +373,8 @@ forge create contracts/AgentVault.sol:AgentVault \
 - **Address-poisoning detection is a heuristic** (shared leading/trailing hex digits). It can be evaded by a crafted near-miss; new recipients are still T2, so a human sees the full address (R11).
 - **Concurrent budgets are safe within one process.** An execution reserves its amount before re-checking and broadcasting, so a second concurrent request cannot spend the same budget; two server processes over one audit log would still race, which is not a supported deployment (R6).
 - **The audit log is tamper-evident, not immutable.** `audit anchor` commits the head hash on-chain and `audit verify --onchain` detects a rewritten or truncated log, but anchoring is manual; entries after the latest anchor rely on the local hash chain (R4).
-- **Session keys are not ERC-4337.** `AgentVaultV2` implements owner-granted, expiring, capped session keys directly; a full account-abstraction stack (bundlers, paymasters) is roadmap. The vault path uses a plain EOA with a capped contract.
 - **USDC and swaps depend on testnet liquidity** (Circle faucet, Uniswap v3 on Base Sepolia); quotes can be far from market (R10).
-- **No ERC-4337 yet.** Account abstraction (bundler, paymaster, a 4337 session-key module) is future work; `AgentVaultV2` session keys are the current on-chain answer.
+- **ERC-4337 is tested, not deployed.** `contracts/SessionKeyAccount.sol` (EntryPoint v0.7, scoped session keys) and `src/aa/userop.ts` are covered by Foundry and vitest tests, but no account has been deployed or used through a live bundler yet (no funded key on the build machine).
 - **Email approval links work only where the owner's browser reaches the UI** (the server is loopback-only), and anyone holding the email can approve that one T2 while it waits (R23).
 - **Telegram approvals trust the configured chat.** Anyone in that chat can approve a T2 (never a T3); keep it private (R19).
 - **The rebalancer plans, it does not trade by itself.** Each step is a separate `execute_swap` that the policy may park or refuse; native ETH is not rebalanced.
@@ -380,7 +387,7 @@ Agent Vault 是一个运行在 **Base Sepolia 测试网**上的 AI 钱包代理�
 链上 `AgentVault` 合约作为最终兜底（私钥被盗也无法超过单日限额）。所有动作写入
 防篡改哈希链审计日志；策略、限额、白名单和急停开关对模型完全只读。
 
-快速开始：`npm install && npm test`（310 个离线测试）→ `npm run cli -- preview <地址> 0.0002`
+快速开始：`npm install && npm test`（314 个离线测试）→ `npm run cli -- preview <地址> 0.0002`
 （查看 T1/T3 判定，不发交易）→ 按 README Setup 生成密钥并领测试币 → `npm run cli -- serve`
 打开本机网页界面（含 T2 审批卡与审计导出）。完整演示脚本见 `docs/DEMO.md`。
 
