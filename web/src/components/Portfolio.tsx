@@ -29,10 +29,11 @@ export function Meter({ label, value, max, decimals = 18, hint }: { label: strin
 export function BudgetMeters({ budget }: { budget: Budget | null }) {
   if (!budget)
     return (
-      <>
+      <div role="status" aria-busy="true">
+        <span className="sr-only">Loading today's limits…</span>
         <div className="skeleton" style={{ height: 44, marginBottom: '0.7rem' }} />
         <div className="skeleton" style={{ height: 44 }} />
-      </>
+      </div>
     );
   return (
     <>
@@ -96,7 +97,12 @@ export function Holdings() {
         </div>
       </div>
       {error && <p className="error">{error}</p>}
-      {!portfolio && !error && <div className="skeleton" style={{ height: 120 }} />}
+      {!portfolio && !error && (
+        <div role="status" aria-busy="true">
+          <span className="sr-only">Loading balances…</span>
+          <div className="skeleton" style={{ height: 120 }} />
+        </div>
+      )}
       {portfolio && (
         <>
           <p className="total">
