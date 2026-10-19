@@ -12,6 +12,8 @@ export interface Holding {
   usdPrice?: string;
   usdValue?: string;
   priceSource?: PriceSource;
+  /** Set when this asset's balance could not be read (RPC failure); the rest still loads. */
+  error?: string;
 }
 
 export interface Portfolio {
@@ -55,12 +57,19 @@ export async function getPortfolio(clients: Clients, policy: Policy): Promise<Po
   });
 
   for (const [symbol, token] of Object.entries(policy.tokens)) {
-    const raw = await publicClient.readContract({
-      address: token.address as Address,
-      abi: erc20Abi,
-      functionName: 'balanceOf',
-      args: [address],
-    });
+    let raw: bigint;
+    try {
+      raw = await publicClient.readContract({
+        address: token.address as Address,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address],
+      });
+    } catch (err) {
+      // Availability: one unreadable token must not hide every other balance.
+      base.holdings.push({ asset: symbol, kind: 'erc20', balance: '0', error: `Balance unavailable: ${shortMessage(err)}` });
+      continue;
+    }
     const price = await getUsdPrice(publicClient, policy, symbol);
     const value = price ? usdValue(raw, token.decimals, price.usdPrice) : undefined;
     if (value) total += parseUnits(value, USD_SCALE);
@@ -76,4 +85,9 @@ export async function getPortfolio(clients: Clients, policy: Policy): Promise<Po
 
   base.totalUsd = formatUnits(total, USD_SCALE);
   return base;
+}
+
+function shortMessage(err: unknown): string {
+  const e = err as { shortMessage?: string; message?: string };
+  return (e.shortMessage ?? e.message ?? String(err)).split('\n')[0]!.slice(0, 160);
 }
