@@ -48,7 +48,7 @@ test('previewing an allowlisted transfer shows T1 and sends nothing', async ({ p
   await page.getByRole('link', { name: 'Transfer', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Transfer' })).toBeVisible();
 
-  await page.getByLabel('Amount').fill('0.0001');
+  await page.getByLabel('Amount', { exact: true }).fill('0.0001');
   await page.getByRole('button', { name: /check tier/i }).click();
 
   // First allowlist label (alice) is preselected; 0.0001 is within the auto cap.

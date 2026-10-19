@@ -118,6 +118,6 @@ export function compliantAlternative(
     kind: 'amount',
     intent: candidate,
     decision,
-    note: `${tidy(wanted, decimals)} ${symbol} to the same recipient ${verb} (${explainTier(decision.tier).split(':')[0]}).`,
+    note: `${tidy(wanted, decimals)} ${symbol} to the same recipient ${verb} (${decision.tier.slice(0, 2)}).`,
   };
 }

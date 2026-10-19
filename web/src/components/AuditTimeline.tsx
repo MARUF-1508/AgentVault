@@ -16,8 +16,9 @@ interface IntentLike {
   spender?: string;
 }
 
-function describeIntent(i: IntentLike): string {
+function describeIntent(i: IntentLike & { seq?: number }): string {
   const kind = (i.kind ?? 'request').replace(/_/g, ' ');
+  if (i.kind === 'audit_anchor') return `anchor audit entry #${i.seq ?? '?'} on-chain`;
   if (i.kind === 'swap') return `swap ${i.amountIn} ${i.tokenIn} to ${i.tokenOut}`;
   const target = i.to ?? i.spender;
   const asset = i.token ?? (i.kind === 'native_transfer' ? 'ETH' : '');
@@ -32,6 +33,8 @@ const LABELS: Record<string, string> = {
   tx_sent: 'Broadcast',
   tx_confirmed: 'Confirmed',
   tx_failed: 'Failed',
+  tx_pending: 'Pending',
+  anchor: 'Anchored',
   schedule: 'Schedule',
   kill_switch: 'Kill switch',
   access: 'Access',
@@ -41,7 +44,20 @@ function detail(e: ActivityEntry, explorer: string | null): ReactNode {
   const d = e.data;
   switch (e.type) {
     case 'intent':
+      if (typeof d.batch === 'number') return `batch of ${d.batch} transfers`;
       return describeIntent((d.intent ?? {}) as IntentLike);
+    case 'tx_pending':
+      return (
+        <>
+          {linkify(String(d.hash ?? ''), explorer)} · no receipt yet
+        </>
+      );
+    case 'anchor':
+      return (
+        <>
+          entry #{String(d.seq)} committed on-chain · {linkify(String(d.txHash ?? ''), explorer)}
+        </>
+      );
     case 'decision': {
       const reasons = (d.reasons as string[] | undefined) ?? [];
       return (
@@ -74,7 +90,16 @@ function detail(e: ActivityEntry, explorer: string | null): ReactNode {
       const who = String(d.user ?? d.by ?? 'unknown');
       switch (d.event) {
         case 'decide':
-          return `${who} ${d.approved ? 'approved' : 'rejected'} a T2 request`;
+          if (d.channel === 'telegram' && d.ok === false) return 'ignored a Telegram button press (wrong chat or stale request)';
+          return `${who} ${d.approved ? 'approved' : 'rejected'} a T2 request${d.channel === 'telegram' ? ' via Telegram' : ''}`;
+        case 'contact_added':
+          return `${who} added ${String(d.label ?? 'a contact')} to the address book`;
+        case 'contact_removed':
+          return `${who} removed ${String(d.label ?? 'a contact')} from the address book`;
+        case 'policy_loaded':
+          return `server started with policy ${String(d.policyHash ?? '').slice(0, 16)}${d.pinned ? ' (pinned)' : ''}`;
+        case 'compliance_export':
+          return `${who} exported the compliance report`;
         case 'login':
         case 'sign_in':
           return `${who} sign-in ${d.ok ? 'succeeded' : 'failed'}${d.reason ? ` (${String(d.reason).replace(/_/g, ' ')})` : ''}`;

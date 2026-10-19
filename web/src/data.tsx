@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import { getBudget, getPolicy, getStatus, type Budget, type Policy, type Status } from './api';
+import { getBudget, getHealth, getPolicy, getStatus, type Budget, type Health, type Policy, type Status } from './api';
 import { usePoll } from './format';
 
 interface WalletData {
@@ -7,6 +7,9 @@ interface WalletData {
   statusError: string;
   budget: Budget | null;
   policy: Policy | null;
+  /** Chain/RPC reachability from /api/health, for the network indicator. */
+  health: Health | null;
+  healthError: string;
   /** Bumps after any action so every page refetches at once. */
   refreshKey: number;
   refresh: () => void;
@@ -14,7 +17,7 @@ interface WalletData {
 
 const DataContext = createContext<WalletData | null>(null);
 
-/** Status, budget and policy, polled once and shared by every page. */
+/** Status, budget, policy and network health, polled once and shared by every page. */
 export function WalletDataProvider({ children }: { children: ReactNode }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [status, statusError] = usePoll(getStatus, 5_000, [refreshKey]);
@@ -22,8 +25,11 @@ export function WalletDataProvider({ children }: { children: ReactNode }) {
   // Also keyed on refreshKey: recipient-list edits must show up immediately,
   // not after the next 60-second poll.
   const [policy] = usePoll(getPolicy, 60_000, [refreshKey]);
+  const [health, healthError] = usePoll(getHealth, 15_000, [refreshKey]);
   return (
-    <DataContext.Provider value={{ status, statusError, budget, policy, refreshKey, refresh: () => setRefreshKey((k) => k + 1) }}>
+    <DataContext.Provider
+      value={{ status, statusError, budget, policy, health, healthError, refreshKey, refresh: () => setRefreshKey((k) => k + 1) }}
+    >
       {children}
     </DataContext.Provider>
   );

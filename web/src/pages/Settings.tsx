@@ -1,8 +1,9 @@
-import { KeyRound, Monitor, Moon, ShieldCheck, Sun, UserPlus, UserRoundX } from 'lucide-react';
+import { BookUser, KeyRound, Monitor, Moon, ShieldCheck, Sun, UserPlus, UserRoundX } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import {
+  addContact,
   addDenied,
   addRecipient,
   addUser,
@@ -10,6 +11,7 @@ import {
   enableTotp,
   getTotpStatus,
   getUsers,
+  removeContact,
   removeDenied,
   removeRecipient,
   removeUser,
@@ -434,6 +436,79 @@ function Recipients() {
   );
 }
 
+/**
+ * Address book (T2): names for addresses you pay now and then. A contact is not
+ * trusted: sends to it are still T2 and wait for an owner. The agent can read
+ * names to resolve "pay bob", but only an owner can edit the book.
+ */
+function AddressBook() {
+  const { can } = useAuth();
+  const { policy, refresh } = useWallet();
+  const [label, setLabel] = useState('');
+  const [address, setAddress] = useState('');
+  const [busy, setBusy] = useState(false);
+  const contacts = policy?.recipients.contacts ?? {};
+  const owner = can('admin');
+
+  const run = (fn: () => Promise<unknown>, message: string) => {
+    setBusy(true);
+    fn()
+      .then(() => {
+        toast.success(message);
+        setLabel('');
+        setAddress('');
+        refresh();
+      })
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <section className="card" aria-labelledby="book-title">
+      <h2 className="row" id="book-title">
+        <BookUser size={18} aria-hidden /> Address book
+      </h2>
+      <p className="muted small">
+        Names the agent can resolve ("pay bob"). A contact is not trusted: every send to it still needs an owner's approval (T2) unless it is also a known
+        recipient above.
+      </p>
+      <ul className="policy-list">
+        {Object.entries(contacts).map(([l, a]) => (
+          <li key={l}>
+            <span className="team-name">{l}</span>
+            <span className="mono muted small addr">{a}</span>
+            {owner && (
+              <button className="ghost small" disabled={busy} onClick={() => run(() => removeContact(l), `${l} removed from the address book.`)}>
+                <UserRoundX size={14} aria-hidden /> Remove
+              </button>
+            )}
+          </li>
+        ))}
+        {!Object.keys(contacts).length && <li className="muted small">(empty)</li>}
+      </ul>
+      {owner && (
+        <form
+          className="stack-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (label.trim() && address.trim()) run(() => addContact(label.trim(), address.trim()), `${label.trim()} added to the address book.`);
+          }}
+        >
+          <div className="row">
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="name, e.g. bob" aria-label="Contact name" maxLength={40} required />
+            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="0x…" className="mono" aria-label="Contact address" required spellCheck={false} />
+          </div>
+          <div className="row">
+            <button type="submit" disabled={busy || !label.trim() || !address.trim()}>
+              <UserPlus size={15} aria-hidden /> Add contact
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
 export default function Settings() {
   usePageTitle('Settings');
   const { choice, setChoice } = useTheme();
@@ -514,6 +589,7 @@ export default function Settings() {
 
       <Reveal>
         <Recipients />
+        <AddressBook />
         <Team />
       </Reveal>
     </>

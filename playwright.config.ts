@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+import { generatePrivateKey } from 'viem/accounts';
 
 /**
  * End-to-end smoke test against the real server and the built UI:
@@ -17,6 +18,9 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:8931',
     trace: 'retain-on-failure',
+    // PW_CHANNEL=msedge (or chrome) runs against an installed browser when the
+    // Playwright download is not available; CI installs Chromium instead.
+    ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}),
   },
   webServer: {
     command: 'npm run cli -- serve 8931',
@@ -29,6 +33,10 @@ export default defineConfig({
       PAUSE_FILE: `${E2E_DIR}/PAUSED`,
       SCHEDULES_FILE: `${E2E_DIR}/schedules.json`,
       VAULT: 'false',
+      // A fresh random key per run: the UI gets a wallet address (receive QR,
+      // portfolio) without any key living in the repo. It is never funded, so
+      // nothing can be sent, and it is discarded when the run ends.
+      AGENT_PRIVATE_KEY: generatePrivateKey(),
     },
   },
 });
