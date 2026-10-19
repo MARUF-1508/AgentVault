@@ -26,6 +26,8 @@ const PRE_AUTH = new Set([
   '/api/auth/totp/enable',
   '/api/auth/totp/disable',
   '/api/auth/sessions/revoke',
+  // Liveness probe: deliberately public, returns only chain/RPC reachability.
+  '/api/health',
 ]);
 
 const source = readFileSync(new URL('../src/web/server.ts', import.meta.url), 'utf8');
@@ -68,7 +70,16 @@ describe('API route coverage', () => {
   it('protects every state-changing route behind a permission, not just a session', () => {
     // A route that only had `read` would let a viewer mutate state; these are the
     // mutations, and each must need more than reading.
-    for (const key of ['POST /api/transact', 'POST /api/decide', 'POST /api/pause', 'POST /api/users', 'POST /api/users/remove']) {
+    for (const key of [
+      'POST /api/transact',
+      'POST /api/batch',
+      'POST /api/decide',
+      'POST /api/pause',
+      'POST /api/users',
+      'POST /api/users/remove',
+      'POST /api/policy/contacts/add',
+      'POST /api/policy/contacts/remove',
+    ]) {
       expect(ROUTES[key]).toBeDefined();
       expect(ROUTES[key]).not.toBe('read');
     }

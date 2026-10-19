@@ -27,5 +27,6 @@ COPY --from=build /app/web/dist ./web/dist
 RUN mkdir -p data && chown -R node:node /app
 USER node
 EXPOSE 8787
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3   CMD node -e "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 # Accounts live in data/users.json (mount ./data to keep them across restarts).
 CMD ["npm", "run", "cli", "--", "serve", "8787"]
