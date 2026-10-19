@@ -80,7 +80,7 @@ jobs:
           retention-days: 7
 
   contracts:
-    name: Foundry tests (AgentVault v1 + v2)
+    name: Foundry tests (AgentVault v1, v2 and the ERC-4337 account)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
