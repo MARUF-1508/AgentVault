@@ -47,8 +47,17 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
     return () => {
       clearTimeout(t);
       document.removeEventListener('keydown', onKey, true);
-      // Restore focus to the opener, if it is still in the page.
-      if (previous && document.contains(previous)) previous.focus();
+      // Restore focus to the opener, if it is still in the page. The dialog's DOM
+      // can be torn down a frame later (exit animations), which on a slow machine
+      // drops focus to <body>; check once more on the next tick and restore again.
+      const restore = () => {
+        if (previous && document.contains(previous)) previous.focus();
+      };
+      restore();
+      setTimeout(() => {
+        const now = document.activeElement;
+        if (!now || now === document.body) restore();
+      }, 0);
     };
     // onEscape is intentionally not a dependency: re-running would steal focus on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
