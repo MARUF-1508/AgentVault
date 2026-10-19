@@ -29,6 +29,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   const commands = useMemo<Command[]>(() => {
     const pages: Command[] = NAV.map(({ to, label, icon }) => ({
@@ -114,6 +115,11 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   }, [open]);
 
   useEffect(() => setActive(0), [q]);
+  // Arrow keys move the highlight while focus stays in the search field, so
+  // keep the active option in view as it moves beyond the list's max-height.
+  useEffect(() => {
+    listRef.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
   // Tab stays inside the palette and focus returns to the opener on close.
   useFocusTrap(dialogRef, open, onClose);
 
@@ -161,6 +167,11 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
                 onKeyDown={onKeyDown}
                 placeholder="Search pages and actions…"
                 aria-label="Search pages and actions"
+                role="combobox"
+                aria-expanded="true"
+                aria-autocomplete="list"
+                aria-controls={shown.length ? 'palette-list' : undefined}
+                aria-activedescendant={shown[active] ? `palette-opt-${active}` : undefined}
                 autoComplete="off"
               />
               <kbd className="palette-kbd">esc</kbd>
@@ -168,10 +179,11 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
             {shown.length === 0 ? (
               <p className="muted small palette-empty">Nothing matches “{query}”.</p>
             ) : (
-              <ul className="palette-list" role="listbox" aria-label="Commands">
+              <ul ref={listRef} id="palette-list" className="palette-list" role="listbox" aria-label="Commands">
                 {shown.map((c, i) => (
                   <li key={c.id}>
                     <button
+                      id={`palette-opt-${i}`}
                       role="option"
                       aria-selected={i === active}
                       className={`palette-item ${i === active ? 'on' : ''}`}

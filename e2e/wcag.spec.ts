@@ -83,6 +83,20 @@ test('keyboard: skip link, landmarks, and dialogs that trap focus and close on E
   await page.keyboard.press('Enter');
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   await expect(palette).toBeVisible();
+  const searchBox = page.getByRole('combobox', { name: /search pages and actions/i });
+  await expect(searchBox).toBeFocused();
+
+  // Arrow keys keep focus in the field but expose the highlighted option to
+  // assistive tech, and the list scrolls so the selection never disappears.
+  const options = palette.getByRole('option');
+  const count = await options.count();
+  for (let i = 1; i < count; i++) await page.keyboard.press('ArrowDown');
+  await expect(searchBox).toHaveAttribute('aria-activedescendant', `palette-opt-${count - 1}`);
+  const listBox = await palette.getByRole('listbox').boundingBox();
+  const lastOption = await options.last().boundingBox();
+  expect(lastOption, 'the last option is scrolled into view').not.toBeNull();
+  expect(lastOption!.y + lastOption!.height).toBeLessThanOrEqual(listBox!.y + listBox!.height + 1);
+
   for (let i = 0; i < 6; i++) await page.keyboard.press('Tab');
   expect(await palette.evaluate((el) => el.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape');
