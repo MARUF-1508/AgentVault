@@ -35,7 +35,12 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
       }
       const first = items[0]!;
       const last = items[items.length - 1]!;
-      if (e.shiftKey && (document.activeElement === first || !node.contains(document.activeElement))) {
+      // Focus outside the dialog (e.g. a Tab pressed before focus moved in) is
+      // always brought back inside, so the trap cannot be escaped by timing.
+      if (!node.contains(document.activeElement)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
