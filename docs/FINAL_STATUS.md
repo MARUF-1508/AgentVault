@@ -15,7 +15,7 @@ hash was touched.
 | Typecheck (web UI) | local, `npm --prefix web run typecheck` | clean |
 | UI production build | local, `npm --prefix web run build` | built, no chunk-size warning (pages are lazy-loaded) |
 | End-to-end + WCAG 2.2 AA | local, `npm run e2e` with `PW_CHANNEL=msedge` | **10 passed / 10**: 5 smoke flows, axe-core over the sign-in page and all 6 app pages in light **and** dark, keyboard contract, live region |
-| GitHub Actions CI | runs `39238065471` (push) and `39238073420` (PR #4) on commit `4ecdcc5` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (10/10), Foundry (69/69), Docker build |
+| GitHub Actions CI | runs `39241874743` (push) and `39241879886` (PR #4) on commit `378037a` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (10/10), Foundry (69/69), Docker build |
 | Foundry contract tests | CI `contracts` job | **69 passed / 69** (AgentVault v1: 12, AgentVaultV2: 37, SessionKeyAccount: 20). Not run locally: Foundry is not installed on this machine; the new contract was compile-checked locally with solc 0.8.28 |
 | Lockfiles | local, `npm ci` (root and `web/`) | install cleanly |
 | Lint | — | no linter is configured in the repo |
@@ -104,6 +104,7 @@ receipts.
 ## Other fixes and hardening in this branch
 
 - Approval TOCTOU: `/api/decide` must name the pending request's id.
+- UI reliability found by CI and reproduced under CPU throttling: a page transition that could leave the previous page on screen after a fast click; focus not returned to the opener when a dialog closed on a slow machine; a Tab pressed before focus entered a dialog escaping the trap; an uncancelled palette focus timer stealing focus after close.
 - Per-user rate limits, bounded chat memory, model outage → 503, LLM retries with backoff.
 - RPC fallback transport, per-token fault tolerance, public `/api/health`.
 - UI: network indicator, RPC-down banner, pending-tx tracker, batch card, address book, compliance download, integrity badges, lazy pages.
