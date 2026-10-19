@@ -1,5 +1,10 @@
 # Agent Vault
 
+[![CI](https://github.com/MARUF-1508/AgentVault/actions/workflows/ci.yml/badge.svg)](https://github.com/MARUF-1508/AgentVault/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/unit%20tests-304%20passing-2563eb)
+![WCAG 2.2 AA](https://img.shields.io/badge/WCAG%202.2-AA%20(axe%20in%20CI)-1d4ed8)
+![testnet only](https://img.shields.io/badge/network-Base%20Sepolia%20testnet-0b1736)
+
 An AI wallet agent that autonomously executes on-chain operations (asset management, transaction execution, risk control) on **Base Sepolia**, behind a deterministic policy firewall the LLM cannot bypass.
 
 > Built for the Shenzhen FinTech International Track, Topic F. See [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
@@ -31,7 +36,27 @@ kill switch, and only `executor.ts` holds the signing client.
 | T0 | Read-only, always allowed | balances, policy, history |
 | T1 | Auto-execute | ≤ 0.0005 ETH to an allowlisted address, within the daily budget |
 | T2 | Human must approve | new recipient, or above the auto limit |
-| T3 | Denied | above hard cap, over daily budget, denylisted, unlimited approval, wrong chain, paused |
+| T3 | Denied | above hard cap, over daily budget, velocity burst, denylisted, unlimited approval, wrong chain, paused |
+
+Every T2/T3 answer explains its tier in one sentence and carries the engine's
+**compliant alternative**: the largest amount the same policy accepts, proven
+by re-running the engine, or why there is none ("budget resets at 00:00 UTC").
+
+## What it can do
+
+| Area | Feature | Where |
+|---|---|---|
+| Transactions | Natural-language transfers (EN / 简体中文), name resolution against the allowlist and an owner-managed **address book** with "did you mean" (never guessed) | `src/agent/`, `src/agent/resolve.ts` |
+| | **Batch payments** (up to 10, all-or-nothing at the policy level) | `execute_batch`, `npm run cli -- batch`, Transfer page |
+| | **Transaction tracking**: pending / confirmed / reverted with confirmations, late receipts written back to the log | `get_transaction_status`, `npm run cli -- tx`, Activity page |
+| | Bounded swaps on Uniswap v3, **rebalancing planner** (each step a policy-checked swap), schedules (optionally run in the background by `serve`) | `src/dex/`, `src/portfolio/rebalance.ts`, `src/schedule/` |
+| | x402 v2 pay-per-fetch through the policy engine | `src/x402.ts` |
+| Security | Pure policy engine with T0–T3, **velocity guard**, task envelopes, address-risk checks, anomaly guard, kill switch | `src/policy/engine.ts` |
+| | Approval card with the **decoded calldata** of the exact tx to sign; approvals answer one request **by id**; optional **Telegram** approver | `src/executor/decode.ts`, `src/approval/` |
+| | Hash-chained audit log, **on-chain anchors** + `audit verify --onchain`, **secret redaction**, **policy file pin** + drift detection, **compliance report** | `src/audit/`, `src/policy/integrity.ts`, `src/report/compliance.ts` |
+| | On-chain caps: AgentVault v1 (deployed) and v2 (session keys + ERC-20) | `contracts/` |
+| Availability | RPC fallback transport, per-token fault tolerance, `/api/health`, LLM retries with backoff, per-user API rate limits | `src/chain/client.ts`, `src/web/` |
+| Interface | Multipage web app: sign-in with roles and TOTP, MetaMask-style network indicator, batch card, live tx status, voice, light/dark, **WCAG 2.2 AA** (axe in CI) | `web/` |
 
 ---
 
@@ -96,12 +121,18 @@ npm run cli -- send <to> 0.5 USDC                  # ERC-20
 npm run cli -- approve USDC <spender> 1            # bounded ERC-20 approval
 npm run cli -- swap USDC WETH 2 50 --dry-run       # quote + policy, nothing sent (50 bps cap)
 npm run cli -- swap USDC WETH 2 50                 # bounded approve + swap on the DEX
+npm run cli -- batch payments.json --dry-run       # several transfers, checked together; nothing sent if any is refused
+npm run cli -- tx <hash>                           # pending / confirmed / reverted, with confirmations
+npm run cli -- pending                             # every broadcast tx still waiting for a receipt
 npm run cli -- schedule list                       # show scheduled / conditional rules
 npm run cli -- schedule run                        # run any due rules (each through the executor)
 npm run cli -- pause                               # kill switch: deny everything
 npm run cli -- resume
 npm run cli -- audit                               # last 20 audit entries
 npm run cli -- audit verify                        # detect tampering
+npm run cli -- audit anchor                        # commit the head hash on-chain (zero-value self tx, T1)
+npm run cli -- audit verify --onchain [tx…]        # local chain + every on-chain anchor
+npm run cli -- policy hash                         # value to pin as POLICY_SHA256
 npm run cli -- serve [--port N]                    # web UI on http://127.0.0.1:5174 (loopback only, sign-in)
 npm run cli -- user add <name> <role>               # web UI account: owner | operator | viewer
 npm run cli -- recipient list                        # allowlist + denylist
@@ -109,7 +140,8 @@ npm run cli -- recipient add <label> <address>       # add a known recipient (au
 npm run cli -- deny add <address>                    # refuse an address outright
 npm run cli -- x402 <resource>                     # paid API demo: pay + fetch (needs X402_API_URL)
 npm run evidence                                   # docs/EXECUTION_EVIDENCE.md with tx hashes
-npm run e2e                                        # Playwright smoke: setup → dashboard → T1 preview
+npm run e2e                                        # Playwright smoke + WCAG 2.2 AA (axe) in both themes
+npm run check                                      # typecheck + unit tests + web typecheck + web build
 npm run coverage                                   # vitest + v8 coverage report
 npm run x402:api                                   # start the demo paid API (FREE_MARKET_API)
 ```
@@ -145,6 +177,20 @@ of the live policy file, Activity can export the audit trail as CSV, and a T2
 request raises a desktop notification. There is also a pause button and an
 audit trail with explorer links. The server binds loopback only; never expose
 it. See `web/README.md`.
+
+The top bar shows the network and RPC health (click to re-check); if the RPC
+is down a banner says what still works and offers a retry. Transfer has a batch
+card and offers the engine's compliant alternative as a one-click amount;
+Activity follows pending transactions until they settle and downloads a
+compliance report; Settings has the address book. The UI is keyboard-operable
+end to end (skip link, focus-trapped dialogs, Escape to close), announces
+verdicts and results through a live region, and meets WCAG 2.2 AA contrast in
+both themes; `e2e/wcag.spec.ts` runs axe-core over every page in CI.
+
+Optional extras (all off by default, see `.env.example`): `SCHEDULER=true` runs
+enabled rules in the background, `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` post
+T2 requests to a private chat with Approve/Reject buttons, `RPC_FALLBACK_URLS`
+adds fallback RPCs, and `POLICY_SHA256` pins the policy file.
 
 ### On-chain vault mode
 
@@ -183,7 +229,7 @@ OpenAI-compatible LLM tier, Foundry, Vite.
 **Zero-key path (2 minutes, no wallet, no LLM key):**
 
 ```bash
-npm install && npm test                # 232 unit tests, offline
+npm install && npm test                # 304 unit tests, offline
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 0.0002   # T1 verdict, nothing sent
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1        # T3 verdict + reasons
 npm run cli -- audit verify             # tamper check (empty log reads intact)
@@ -201,12 +247,13 @@ address you control). All demo amounts are tiny on purpose. A ready-made
 | Criterion | Where |
 |---|---|
 | Task completion (40%) | `docs/DEMO.md` (working flow), `src/agent/`, `src/policy/`, `src/executor/`; live hashes in `docs/EXECUTION_EVIDENCE.md` |
-| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R18), `test/` (232 unit + 49 Foundry), `contracts/AgentVault.sol` |
-| Innovation & interaction (30%) | Denial-with-alternative UX, tier preview without LLM, counterfactual **what-if** simulator, **task budget envelope**, **stale-allowance cleanup**, voice chat, approval cards, policy fingerprint, explanation of every decision, x402 **v2** paid-data flow, agent-wallet skill (`AGENTS.md`, `.opencode/`) |
+| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R22), `test/` (304 unit + 49 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
+| Innovation & interaction (30%) | Engine-proven compliant alternatives, EN/中文 agent, batch payments, rebalancing planner, Telegram approvals, decoded-calldata approval card, on-chain audit anchors, WCAG 2.2 AA UI, denial-with-alternative UX, tier preview without LLM, counterfactual **what-if** simulator, **task budget envelope**, **stale-allowance cleanup**, voice chat, approval cards, policy fingerprint, explanation of every decision, x402 **v2** paid-data flow, agent-wallet skill (`AGENTS.md`, `.opencode/`) |
 | On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls; `AgentVaultV2.sol` session keys + ERC-20; vault-routing mode; x402 payment — with tx hashes in `docs/EXECUTION_EVIDENCE.md` |
 | Architecture / technical doc | `docs/TECHNICAL.md` |
 | Evidence of real runs | `docs/EXECUTION_EVIDENCE.md` (regenerate: `npm run evidence`) |
 | Presentation deck (≤ 10 min) | `docs/deck.pdf` (source: `docs/deck.html`) |
+| Final status (what is verified, what is left) | `docs/FINAL_STATUS.md` |
 
 ---
 
@@ -315,9 +362,11 @@ forge create contracts/AgentVault.sol:AgentVault \
 - **ERC-20 on-chain coverage is opt-in.** v1 `AgentVault` moves only native ETH. Deploy `AgentVaultV2` and set `VAULT_TOKENS=true` to route ERC-20 transfers through `agentSendToken` under an on-chain token cap; until a v2 vault is deployed, token transfers come from the agent EOA bounded by the off-chain policy only (R16).
 - **Address-poisoning detection is a heuristic** (shared leading/trailing hex digits). It can be evaded by a crafted near-miss; new recipients are still T2, so a human sees the full address (R11).
 - **Concurrent budgets are safe within one process.** An execution reserves its amount before re-checking and broadcasting, so a second concurrent request cannot spend the same budget; two server processes over one audit log would still race, which is not a supported deployment (R6).
-- **The audit log is tamper-evident, not immutable.** Full deletion resets budgets; anchoring the head hash on-chain is future work (R4).
+- **The audit log is tamper-evident, not immutable.** `audit anchor` commits the head hash on-chain and `audit verify --onchain` detects a rewritten or truncated log, but anchoring is manual; entries after the latest anchor rely on the local hash chain (R4).
 - **Session keys are not ERC-4337.** `AgentVaultV2` implements owner-granted, expiring, capped session keys directly; a full account-abstraction stack (bundlers, paymasters) is roadmap. The vault path uses a plain EOA with a capped contract.
 - **USDC and swaps depend on testnet liquidity** (Circle faucet, Uniswap v3 on Base Sepolia); quotes can be far from market (R10).
+- **Telegram approvals trust the configured chat.** Anyone in that chat can approve a T2 (never a T3); keep it private (R19).
+- **The rebalancer plans, it does not trade by itself.** Each step is a separate `execute_swap` that the policy may park or refuse; native ETH is not rebalanced.
 - Full list with likelihood/impact/mitigation: `docs/SECURITY_SELF_ASSESSMENT.md` §4.
 
 ## 中文速览 (Chinese quick look)
@@ -327,9 +376,15 @@ Agent Vault 是一个运行在 **Base Sepolia 测试网**上的 AI 钱包代理�
 链上 `AgentVault` 合约作为最终兜底（私钥被盗也无法超过单日限额）。所有动作写入
 防篡改哈希链审计日志；策略、限额、白名单和急停开关对模型完全只读。
 
-快速开始：`npm install && npm test`（162 个离线测试）→ `npm run cli -- preview <地址> 0.0002`
+快速开始：`npm install && npm test`（304 个离线测试）→ `npm run cli -- preview <地址> 0.0002`
 （查看 T1/T3 判定，不发交易）→ 按 README Setup 生成密钥并领测试币 → `npm run cli -- serve`
 打开本机网页界面（含 T2 审批卡与审计导出）。完整演示脚本见 `docs/DEMO.md`。
+
+新增：代理可用中文对话（中文提问即中文回答）；被拒绝的转账会由策略引擎给出“合规替代方案”
+（例如“可改为 0.005 ETH，需要人工审批”）；支持批量转账（任一笔违规则全部不发送）、交易状态跟踪、
+地址簿（按名字解析但仍需审批）、速率/突发限制（velocity guard）、审计日志上链锚定
+（`audit anchor` / `audit verify --onchain`）、策略文件哈希锁定（`POLICY_SHA256`）、合规报告导出，
+以及符合 WCAG 2.2 AA 的无障碍界面。
 
 ## Working on this with an AI coding agent
 `AGENTS.md` holds the project rules and `.opencode/skills/agent-wallet/SKILL.md` is an opencode skill with the workflow. opencode picks both up automatically when run from the repo root.

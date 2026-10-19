@@ -143,6 +143,34 @@ new address.
 - [x] A: **stale-allowance cleanup** — `approve(spender, 0)` (CLI `revoke`) is always allowed (it can only shrink an allowance) even for a non-allowlisted spender.
 - [x] A: **counterfactual what-if** — `whatif` CLI and the read-only `what_if` tool evaluate the same intent under a hypothesis (allowlisted recipient, different limits, already spent, paused) without signing or mutating anything.
 
+### Final upgrade (19 Oct, branch `feat/final-upgrade`)
+
+Additive again: no contract change, no evidence hash touched. Details and the
+exact verification results are in `docs/FINAL_STATUS.md`.
+
+- [x] T1 compliant alternative computed by the engine (`src/policy/alternative.ts`), attached to every refused/approval-bound preview and execute result, shown in the UI with a one-click amount.
+- [x] T2 address book (`recipients.contacts`): names resolve but stay T2; near misses come back as "did you mean", never resolved silently.
+- [x] T3 batch payments (CLI `batch`, `execute_batch` tool, Transfer page card); all-or-nothing at the policy level.
+- [x] T4 transaction status tracking (`tx`, `pending`, `get_transaction_status`, `/api/tx`); receipt timeouts become `pending`, not an unhandled error.
+- [x] T5 schedules run in the background inside `serve` when `SCHEDULER=true`.
+- [x] T6 rebalancing planner (`plan_rebalance`), each step a policy-checked swap.
+- [x] S1 budget mutex: existing reservation ledger kept; fixed the double count while a receipt is outstanding.
+- [x] S2 on-chain audit anchor (`audit anchor`, `audit verify --onchain`). Code and tests done.
+- [ ] S2 live anchor transaction on Base Sepolia recorded in the evidence (needs the funded key; command in `docs/FINAL_STATUS.md`).
+- [x] S4 policy file pin (`POLICY_SHA256`) and drift detection.
+- [x] S5 velocity guard (`rateLimit.velocity`).
+- [x] S6 decoded calldata on the approval card.
+- [x] S7 compliance report export (`GET /api/compliance`, Activity page).
+- [x] S8 secret redaction with a test that the key never reaches the audit file.
+- [x] I2 English + Simplified Chinese replies.
+- [x] I4 Telegram approver (opt-in).
+- [ ] B2 ERC-4337 session key: not done. AgentVaultV2 session keys remain the on-chain answer.
+- [x] Security: approval ids (TOCTOU), per-user rate limits, Fetch Metadata check, no-store, permissions policy, bounded chat memory, LLM retries.
+- [x] Wallet UX: network indicator, RPC-down banner with retry, RPC fallback transport, `/api/health`.
+- [x] WCAG 2.2 AA: skip link, focus traps, live regions, contrast fixes; axe-core e2e over every page in both themes.
+- [x] CI: `.github/workflows/ci.yml` (typecheck, unit tests, UI build, Playwright + axe, Foundry, Docker build).
+- [ ] First green CI run on GitHub (runs on the first push of the branch).
+
 ---
 
 ## 5. Submission checklist → where it comes from
