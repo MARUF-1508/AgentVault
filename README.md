@@ -68,8 +68,8 @@ Base Sepolia RPC.
 
 ## Evidence at a glance
 
-Real Base Sepolia transactions from the team's runs (full table, 16 agent
-transactions and 5 policy refusals: [`docs/EXECUTION_EVIDENCE.md`](docs/EXECUTION_EVIDENCE.md)).
+Real Base Sepolia transactions from the team's runs (full table, 20 on-chain
+actions and 5 policy refusals: [`docs/EXECUTION_EVIDENCE.md`](docs/EXECUTION_EVIDENCE.md)).
 
 | What | Transaction |
 |---|---|
@@ -80,6 +80,9 @@ transactions and 5 policy refusals: [`docs/EXECUTION_EVIDENCE.md`](docs/EXECUTIO
 | T1 automatic transfer | [`0x40299548…`](https://sepolia.basescan.org/tx/0x40299548ddf85c221936ed4d8429b322e676e244bf835a7a3ccf22e531c62365) ✅ |
 | T2 transfer after a human approval | [`0xe0e69dc5…`](https://sepolia.basescan.org/tx/0xe0e69dc5e8395e1e2060318cbec1e85256a74e498252683f9b7f55b7709e2fca) ✅ |
 | Bounded Uniswap v3 swap (approve + swap) | [`0x8c85259b…`](https://sepolia.basescan.org/tx/0x8c85259bda1f0829cd23a46591acb4184e0513e08040beaeb19c67207f53c3d5) ✅ |
+| Audit head anchored on-chain, verified with `audit verify --onchain` | [`0x561f8a6a…`](https://sepolia.basescan.org/tx/0x561f8a6a4fb66e7d9021ac12359a8288118c1a8558b0803bc47090959cf53b6d) ✅ |
+| Two-line batch payment (both T1, both confirmed) | [`0xb6245068…`](https://sepolia.basescan.org/tx/0xb62450685da34f2794f92e1361d8c22e55ed4adfd0c80c28fedc582d3d8c39bc) · [`0xeca94314…`](https://sepolia.basescan.org/tx/0xeca9431472290ff0c1e5d8d663b74245e24ec1b0bcfa46321afdd3f6d214495c) ✅ |
+| ERC-4337 account deployed + session-key userOp through EntryPoint v0.7 | [`0x71c45789…` account](https://sepolia.basescan.org/address/0x71c457899cd25f52e4e49dacdcc84f890c1ea98c) · [userOp tx](https://sepolia.basescan.org/tx/0x164877c9b480a2ac77fd5c14540b8df9562340f68f71ab212ae5423576d0d6c1) ✅ |
 
 Tests: 314 unit (vitest) · 10 end-to-end incl. WCAG 2.2 AA (Playwright + axe) ·
 69 contract (Foundry), all run in CI on every push.
@@ -293,9 +296,9 @@ address you control). All demo amounts are tiny on purpose. A ready-made
 | Task completion (40%) | `docs/DEMO.md` (working flow), `src/agent/`, `src/policy/`, `src/executor/`; live hashes in `docs/EXECUTION_EVIDENCE.md` |
 | Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R24), `test/` (314 unit + 69 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
 | Innovation & interaction (30%) | Engine-proven compliant alternatives, EN/中文 agent, batch payments, rebalancing planner, Telegram and email approvals, decoded-calldata approval card, on-chain audit anchors, ERC-4337 session keys, WCAG 2.2 AA UI, tier preview without LLM, counterfactual **what-if** simulator, **task budget envelope**, **stale-allowance cleanup**, voice chat, policy fingerprint, explanation of every decision, x402 **v2** paid-data flow |
-| On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls; `AgentVaultV2.sol` session keys + ERC-20; vault-routing mode; x402 payment — with tx hashes in `docs/EXECUTION_EVIDENCE.md`; `SessionKeyAccount.sol` ERC-4337 account (tested, not yet deployed); on-chain audit anchors |
+| On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls; `AgentVaultV2.sol` session keys + ERC-20; vault-routing mode; x402 payment — with tx hashes in `docs/EXECUTION_EVIDENCE.md`; `SessionKeyAccount.sol` ERC-4337 account (deployed; live session-key userOp through EntryPoint v0.7); on-chain audit anchors |
 | Architecture / technical doc | `docs/TECHNICAL.md` |
-| Evidence of real runs | `docs/EXECUTION_EVIDENCE.md` (regenerate: `npm run evidence`). The vault, x402 and swap hashes there are live; the audit-anchor and batch hashes from the final upgrade are **not yet recorded** (they need the funded key, see `docs/FINAL_STATUS.md`) |
+| Evidence of real runs | `docs/EXECUTION_EVIDENCE.md` (regenerate: `npm run evidence`). The vault, x402, swap, audit-anchor, batch and ERC-4337 userOp hashes there are live; the anchor is also verified by `audit verify --onchain` (see `docs/FINAL_STATUS.md`) |
 | Presentation deck (≤ 10 min) | `docs/deck.pdf` (source: `docs/deck.html`) |
 | Final status (what is verified, what is left) | `docs/FINAL_STATUS.md` |
 
@@ -401,7 +404,7 @@ forge create contracts/AgentVault.sol:AgentVault \
 - **Concurrent budgets are safe within one process.** An execution reserves its amount before re-checking and broadcasting, so a second concurrent request cannot spend the same budget; two server processes over one audit log would still race, which is not a supported deployment (R6).
 - **The audit log is tamper-evident, not immutable.** `audit anchor` commits the head hash on-chain and `audit verify --onchain` detects a rewritten or truncated log, but anchoring is manual; entries after the latest anchor rely on the local hash chain (R4).
 - **USDC and swaps depend on testnet liquidity** (Circle faucet, Uniswap v3 on Base Sepolia); quotes can be far from market (R10).
-- **ERC-4337 is tested, not deployed.** `contracts/SessionKeyAccount.sol` (EntryPoint v0.7, scoped session keys) and `src/aa/userop.ts` are covered by Foundry and vitest tests, but no account has been deployed or used through a live bundler yet (no funded key on the build machine).
+- **ERC-4337 is deployed on Base Sepolia.** `contracts/SessionKeyAccount.sol` (EntryPoint v0.7, scoped session keys) and `src/aa/userop.ts` are covered by Foundry and vitest tests; the account is live at `0x71c45789…` and a session-key operation has been executed through `handleOps` (`0x164877c9…`, `SessionSpend` + `UserOperationEvent(success=true)`). A bundler-relayed run is optional and uses the same operation.
 - **Email approval links work only where the owner's browser reaches the UI** (the server is loopback-only), and anyone holding the email can approve that one T2 while it waits (R23).
 - **Telegram approvals trust the configured chat.** Anyone in that chat can approve a T2 (never a T3); keep it private (R19).
 - **The rebalancer plans, it does not trade by itself.** Each step is a separate `execute_swap` that the policy may park or refuse; native ETH is not rebalanced.

@@ -1,6 +1,6 @@
 # Execution Evidence
 
-Generated 2026-10-17T20:33:36.054Z from `data/audit.jsonl`.
+Generated 2026-10-19T15:31:33.775Z from `data/audit.jsonl`.
 Audit chain integrity: ✅ intact
 ## AgentVault (on-chain enforcement)
 
@@ -12,7 +12,7 @@ Over-cap agent call (0.001 ETH): [0x22da3e42…](https://sepolia.basescan.org/tx
 Non-allowlisted agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd71e8143568d1d418149b290ca0ddab5fc4015cebdfe3d5ef608ee47fb24e568) ❌ reverted on-chain
 
 
-## On-chain transactions (16)
+## On-chain transactions (20)
 
 | Time (UTC) | Action | Amount | Tier | Result | Tx hash |
 |---|---|---|---|---|---|
@@ -32,6 +32,10 @@ Non-allowlisted agent call: [0xd71e8143…](https://sepolia.basescan.org/tx/0xd7
 | 2026-10-17T19:51:07.596Z | native_transfer | 0.0002 ETH | T1_AUTO | ✅ block 48249190 | [0xc24761c4…](https://sepolia.basescan.org/tx/0xc24761c479c3455352fda3e6778d6bf6cc863b8512ae750f53ab79fef1f6dad0) |
 | 2026-10-17T20:32:35.295Z | native_transfer | 0.0001 ETH | T1_AUTO | ✅ block 48250434 | [0x9ba0ae07…](https://sepolia.basescan.org/tx/0x9ba0ae077d760706b6938da968593d610376312654198a29e134de93d573dc73) |
 | 2026-10-17T20:32:52.909Z | native_transfer | 0.0001 ETH | T2_CONFIRM | ✅ block 48250443 | [0x32cc4187…](https://sepolia.basescan.org/tx/0x32cc41871fd959c4dc7f13d69fae0c55ba26496367382b18478145216536583b) |
+| 2026-10-18T07:47:41.495Z | native_transfer | 0.0002 ETH | T2_CONFIRM | ✅ block 48270687 | [0x8b7d2a8c…](https://sepolia.basescan.org/tx/0x8b7d2a8c121faf0327ac42eafff0a9fc28a6139f150e0bd3957d7170e55f962d) |
+| 2026-10-19T15:17:47.106Z | audit_anchor | 0 (audit entry #175) ETH | T1_AUTO | ✅ block 48327390 | [0x561f8a6a…](https://sepolia.basescan.org/tx/0x561f8a6a4fb66e7d9021ac12359a8288118c1a8558b0803bc47090959cf53b6d) |
+| 2026-10-19T15:29:40.428Z | native_transfer | 0.0001 ETH | T1_AUTO | ✅ block 48327747 | [0xb6245068…](https://sepolia.basescan.org/tx/0xb62450685da34f2794f92e1361d8c22e55ed4adfd0c80c28fedc582d3d8c39bc) |
+| 2026-10-19T15:29:51.430Z | native_transfer | 0.0001 ETH | T1_AUTO | ✅ block 48327753 | [0xeca94314…](https://sepolia.basescan.org/tx/0xeca9431472290ff0c1e5d8d663b74245e24ec1b0bcfa46321afdd3f6d214495c) |
 
 ## Blocked by policy (5)
 

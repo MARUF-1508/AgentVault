@@ -75,7 +75,7 @@ Limits live in `config/policy.json`. The agent can read the policy but has **no 
 - Hash-chained audit log (tamper detection tested) that also drives daily budgets.
 - LLM agent loop over any OpenAI-compatible API (tool calling), with an injection-aware system prompt.
 - `npm run evidence` produces the tx-hash table for submission item 6.
-- `contracts/AgentVault.sol` (compiles with solc 0.8.28; not yet deployed or tested).
+- `contracts/AgentVault.sol` (12 Foundry tests; deployed at `0x098f7Cb9…`).
 
 ---
 
@@ -156,7 +156,7 @@ exact verification results are in `docs/FINAL_STATUS.md`.
 - [x] T6 rebalancing planner (`plan_rebalance`), each step a policy-checked swap.
 - [x] S1 budget mutex: existing reservation ledger kept; fixed the double count while a receipt is outstanding.
 - [x] S2 on-chain audit anchor (`audit anchor`, `audit verify --onchain`). Code and tests done.
-- [ ] S2 live anchor transaction on Base Sepolia recorded in the evidence (needs the funded key; command in `docs/FINAL_STATUS.md`).
+- [x] S2 live anchor transaction on Base Sepolia recorded in the evidence (`0x561f8a6a…`, entry #175, verified with `audit verify --onchain`; 19 Oct).
 - [x] S4 policy file pin (`POLICY_SHA256`) and drift detection.
 - [x] S5 velocity guard (`rateLimit.velocity`).
 - [x] S6 decoded calldata on the approval card.
@@ -166,13 +166,13 @@ exact verification results are in `docs/FINAL_STATUS.md`.
 - [x] I4 Telegram approver (opt-in).
 - [x] I4 email approver (opt-in): signed one-time links bound to the request id, confirmation page before deciding (`src/approval/email.ts`).
 - [x] B2 ERC-4337 session key: `contracts/SessionKeyAccount.sol` (EntryPoint v0.7) + `src/aa/userop.ts`, Foundry and vitest tests.
-- [ ] B2 live deployment through a bundler (needs the funded key).
+- [x] B2 live deployment + a session-key userOp (`0x71c45789…` deployed; `handleOps` tx `0x164877c9…` with `SessionSpend` and `UserOperationEvent(success=true)`). A bundler relay is optional; the same op can be submitted through any v0.7 bundler.
 - [x] Security: approval ids (TOCTOU), per-user rate limits, Fetch Metadata check, no-store, permissions policy, bounded chat memory, LLM retries.
 - [x] Wallet UX: network indicator, RPC-down banner with retry, RPC fallback transport, `/api/health`.
 - [x] WCAG 2.2 AA: skip link, focus traps, live regions, contrast fixes; axe-core e2e over every page in both themes.
 - [x] CI: `.github/workflows/ci.yml` (typecheck, unit tests, UI build, Playwright + axe, Foundry, Docker build).
 - [x] Green CI on GitHub: runs 39241874743 and 39241879886 on `378037a`, all four jobs green (e2e 10/10, Foundry 69/69).
-- [ ] Live audit-anchor and batch transactions: blocked on this machine (no `.env`, no funded key); must run where the key lives.
+- [x] Live audit-anchor and batch transactions recorded on Base Sepolia (19 Oct; see `docs/EXECUTION_EVIDENCE.md`, now 20 actions + 5 refusals).
 
 ---
 
