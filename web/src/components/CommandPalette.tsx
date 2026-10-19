@@ -103,12 +103,14 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const shown = q ? commands.filter((c) => `${c.label} ${c.hint ?? ''} ${c.keywords}`.toLowerCase().includes(q)) : commands;
 
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setActive(0);
-      // Focus after the entrance animation starts, or Safari drops it.
-      setTimeout(() => inputRef.current?.focus(), 30);
-    }
+    if (!open) return;
+    setQuery('');
+    setActive(0);
+    // Focus after the entrance animation starts, or Safari drops it. Cancelled
+    // if the palette closes first: a late focus() on the closing input would
+    // steal focus back from the opener and then drop it on <body>.
+    const t = setTimeout(() => inputRef.current?.focus(), 30);
+    return () => clearTimeout(t);
   }, [open]);
 
   useEffect(() => setActive(0), [q]);
