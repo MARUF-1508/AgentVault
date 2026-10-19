@@ -11,23 +11,21 @@ hash was touched.
 | Check | Where | Result |
 |---|---|---|
 | Typecheck (agent, CLI, tests) | local, `npm run typecheck` | clean |
-| Unit + integration tests | local, `npm test` | **310 passed / 310**, 37 files (baseline before this branch: 232 / 24 files) |
+| Unit + integration tests | local, `npm test` | **314 passed / 314**, 38 files (baseline before this branch: 232 / 24 files) |
 | Typecheck (web UI) | local, `npm --prefix web run typecheck` | clean |
 | UI production build | local, `npm --prefix web run build` | built, no chunk-size warning (pages are lazy-loaded) |
 | End-to-end + WCAG 2.2 AA | local, `npm run e2e` with `PW_CHANNEL=msedge` | **10 passed / 10**: 5 smoke flows, axe-core over the sign-in page and all 6 app pages in light **and** dark, keyboard contract, live region |
 | GitHub Actions CI | run `39200521759` on commit `73cc57a` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe, Foundry, Docker build |
-| Foundry contract tests | CI `contracts` job | **49 passed / 49** (AgentVault v1: 12, AgentVaultV2: 37). Not run locally: Foundry is not installed on this machine |
+| Foundry contract tests | CI `contracts` job | **69 passed / 69** (AgentVault v1: 12, AgentVaultV2: 37, SessionKeyAccount: 20). Not run locally: Foundry is not installed on this machine; the new contract was compile-checked locally with solc 0.8.28 |
 | Lockfiles | local, `npm ci` (root and `web/`) | install cleanly |
 | Lint | — | no linter is configured in the repo |
 
-Commits after `73cc57a` (email approver and these docs) were verified locally
-with the same commands; their CI run starts on push.
 
 ## Live testnet evidence: not produced (blocked)
 
-The brief asked for a live audit anchor, an on-chain verification, an optional
-live batch and a regenerated evidence doc. None of these could run on this
-machine:
+The planned live steps were an audit anchor, its on-chain verification, a small
+live batch, a regenerated evidence doc and an ERC-4337 deployment. None of these
+could run on the build machine:
 
 - There is **no `.env`** in `E:\Project\AgentVault` (only `.env.example`), so
   there is no agent key, no LLM key and no Telegram/SMTP configuration.
@@ -56,9 +54,18 @@ npm run cli -- batch /tmp/batch.json
 npm run evidence
 git add docs/EXECUTION_EVIDENCE.md && git commit -m "docs(evidence): audit anchor and batch hashes"
 git push origin feat/final-upgrade
+
+# Optional (B2): deploy the ERC-4337 account with the OWNER key and grant the agent a session
+OWNER_ADDRESS=0x... SESSION_KEY=<agent address> SESSION_RECIPIENT=0x4785Dca37A242F3D80f844CB0b143A687008a2B5   forge script script/DeploySessionKeyAccount.s.sol --rpc-url https://sepolia.base.org --private-key <OWNER_KEY> --broadcast
 ```
 
-## Feature list (the 20-item plan)
+## Feature list
+
+The upgrade plan named 18 features (T1–T6, S1–S8, I2–I4, B2), all below. All 18
+are implemented and tested. Three have a live part that still needs the funded
+key: the S2 anchor transaction, the I2 check against a real model, and the B2
+deployment.
+
 
 | ID | Feature | Status | Evidence |
 |---|---|---|---|
@@ -79,7 +86,7 @@ git push origin feat/final-upgrade
 | I2 | English + Chinese agent | ✅ unit-tested; ❌ not live-checked | no LLM key on this machine |
 | I3 | x402 agent payment | ✅ done (by the team) | `src/x402.ts` |
 | I4 | Telegram + email approvers | ✅ done (tested with fakes) | `src/approval/telegram.ts`, `src/approval/email.ts`, `test/approvers-runtime.test.ts`, `test/email-approver.test.ts`; not run against real Telegram/SMTP |
-| B2 | ERC-4337 session key | ❌ future work | AgentVaultV2 owner-granted session keys remain the on-chain answer; a 4337 module (bundler, paymaster, session-key validator) is roadmap |
+| B2 | ERC-4337 session key | ✅ code + tests; ❌ not deployed | `contracts/SessionKeyAccount.sol` (EntryPoint v0.7 account: session keys scoped to targets, selectors, per-op and total value caps, expiry via `validUntil`), `src/aa/userop.ts` (v0.7 hash, signing, scope from `config/policy.json`), `script/DeploySessionKeyAccount.s.sol`, 20 Foundry + 4 vitest tests sharing one hash vector. Not deployed or used through a live bundler (no funded key) |
 
 Known problems from the brief: plan checkboxes updated truthfully; vault
 ETH-only closed by V2; concurrent overspend closed plus the double-count fix;
@@ -107,5 +114,5 @@ receipts.
 
 - Live anchor + batch hashes in `docs/EXECUTION_EVIDENCE.md` (needs the funded key; commands above).
 - Live check of the agent in English and Chinese (needs an LLM key).
-- B2 ERC-4337 (future work).
+- B2 live deployment of the ERC-4337 account and one session-key user operation through a v0.7 bundler (needs the funded key and a bundler endpoint).
 - The deck and demo video are handled separately.

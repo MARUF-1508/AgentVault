@@ -60,7 +60,7 @@ by re-running the engine, or why there is none ("budget resets at 00:00 UTC").
 | Security | Pure policy engine with T0–T3, **velocity guard**, task envelopes, address-risk checks, anomaly guard, kill switch | `src/policy/engine.ts` |
 | | Approval card with the **decoded calldata** of the exact tx to sign; approvals answer one request **by id**; optional **Telegram** and **email** approvers (signed one-time links) | `src/executor/decode.ts`, `src/approval/` |
 | | Hash-chained audit log, **on-chain anchors** + `audit verify --onchain`, **secret redaction**, **policy file pin** + drift detection, **compliance report** | `src/audit/`, `src/policy/integrity.ts`, `src/report/compliance.ts` |
-| | On-chain caps: AgentVault v1 (deployed) and v2 (session keys + ERC-20) | `contracts/` |
+| | On-chain caps: AgentVault v1 (deployed) and v2 (session keys + ERC-20); **ERC-4337 smart account** (EntryPoint v0.7) whose session keys are scoped to targets, selectors, value caps and expiry | `contracts/`, `src/aa/userop.ts` |
 | Availability | RPC fallback transport, per-token fault tolerance, `/api/health`, LLM retries with backoff, per-user API rate limits | `src/chain/client.ts`, `src/web/` |
 | Interface | Multipage web app: sign-in with roles and TOTP, MetaMask-style network indicator, batch card, live tx status, voice, light/dark, **WCAG 2.2 AA** (axe in CI) | `web/` |
 
@@ -255,7 +255,7 @@ address you control). All demo amounts are tiny on purpose. A ready-made
 | Criterion | Where |
 |---|---|
 | Task completion (40%) | `docs/DEMO.md` (working flow), `src/agent/`, `src/policy/`, `src/executor/`; live hashes in `docs/EXECUTION_EVIDENCE.md` |
-| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R23), `test/` (314 unit + 69 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
+| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R24), `test/` (314 unit + 69 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
 | Innovation & interaction (30%) | Engine-proven compliant alternatives, EN/中文 agent, batch payments, rebalancing planner, Telegram approvals, decoded-calldata approval card, on-chain audit anchors, WCAG 2.2 AA UI, denial-with-alternative UX, tier preview without LLM, counterfactual **what-if** simulator, **task budget envelope**, **stale-allowance cleanup**, voice chat, approval cards, policy fingerprint, explanation of every decision, x402 **v2** paid-data flow, agent-wallet skill (`AGENTS.md`, `.opencode/`) |
 | On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls; `AgentVaultV2.sol` session keys + ERC-20; vault-routing mode; x402 payment — with tx hashes in `docs/EXECUTION_EVIDENCE.md` |
 | Architecture / technical doc | `docs/TECHNICAL.md` |
@@ -347,7 +347,7 @@ forge test                           # v1: per-tx cap, daily reset, non-agent re
 The vault is deployed by the **owner** (a key different from the agent's). With [Foundry](https://book.getfoundry.sh/):
 ```bash
 forge install foundry-rs/forge-std --no-commit   # once per clone (lib/ is git-ignored)
-forge test                                       # 49 contract tests (12 v1 + 37 v2), no network needed
+forge test                                       # 69 contract tests (12 v1 + 37 v2 + 20 ERC-4337 account), no network needed
 export AGENT_ADDRESS=0x...                       # the agent's funded key
 export VAULT_MAX_PER_TX=500000000000000          # 0.0005 ether
 export VAULT_DAILY_LIMIT=10000000000000000       # 0.01 ether
