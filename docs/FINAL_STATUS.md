@@ -14,9 +14,9 @@ was touched.
 | Unit + integration tests | local, `npm test` | **314 passed / 314**, 38 files (baseline before this branch: 232 / 24 files) |
 | Typecheck (web UI) | local, `npm --prefix web run typecheck` | clean |
 | UI production build | local, `npm --prefix web run build` | built, no chunk-size warning (pages are lazy-loaded) |
-| End-to-end + WCAG 2.2 AA | local, `npm run e2e` with `PW_CHANNEL=msedge` | **10 passed / 10**: 5 smoke flows, axe-core over the sign-in page and all 6 app pages in light **and** dark, keyboard contract, live region |
+| End-to-end + WCAG 2.2 AA | local, `npm run e2e` with `PW_CHANNEL=msedge` | **11 passed / 11**: 6 smoke flows (incl. phone-width overflow guards), axe-core over the sign-in page and all 6 app pages in light **and** dark, keyboard contract, live region |
 | GitHub Actions CI | runs `39241874743` (push) and `39241879886` (PR #4) on commit `378037a` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (10/10), Foundry (69/69), Docker build |
-| Foundry contract tests | CI `contracts` job | **69 passed / 69** (AgentVault v1: 12, AgentVaultV2: 37, SessionKeyAccount: 20). Not run locally: Foundry is not installed on this machine; the new contract was compile-checked locally with solc 0.8.28 |
+| Foundry contract tests | CI `contracts` job and local `forge test` | **69 passed / 69** (AgentVault v1: 12, AgentVaultV2: 37, SessionKeyAccount: 20); Foundry was installed locally before the final run and the full suite passes there too |
 | Lockfiles | local, `npm ci` (root and `web/`) | install cleanly |
 | Lint | — | no linter is configured in the repo |
 | Live testnet run | Base Sepolia, funded team key | **passed**: audit anchor + `--onchain` verify, 2-line batch, live EN/中文 agent replies, B2 deploy + session-key userOp (details below) |
@@ -50,6 +50,14 @@ the previous revision are now closed:
   block 48328075, gas 139486). The tx emitted `SessionSpend` for 0.0001 ETH and
   `UserOperationEvent(success=true)`. No bundler API key was needed because the
   owner self-submitted the operation; any v0.7 bundler can relay the same op.
+
+- **Wallet hygiene (found during the live run)**: the agent EOA carried an
+  EIP-7702 delegation to MetaMask's stateless deleGator contract, which made any
+  self-transaction with calldata revert. Plain ETH transfers were unaffected.
+  The delegation was revoked with a type-4 authorization to the zero address
+  ([`0x6f581f7a…`](https://sepolia.basescan.org/tx/0x6f581f7aa448db8c223e128afa26f71a70322c1f8eecb5db535492e6e25c62ef))
+  before the batch run was recorded, so every on-chain step below ran on a plain
+  EOA.
 
 No Telegram/SMTP message was sent (the approvers are opt-in and were tested with
 fakes); the live Telegram/SMTP paths remain untested by design.
