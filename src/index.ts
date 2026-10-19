@@ -27,7 +27,7 @@ import { createServer } from './web/server.js';
 import { Scheduler } from './schedule/background.js';
 import { runDueRules } from './schedule/runner.js';
 
-const USAGE = `Agent Wallet
+const USAGE = `Agent Vault
 
   npm run cli -- info                              wallet address, chain, balance
   npm run cli -- portfolio                         balances with USD value
@@ -471,7 +471,7 @@ async function cmdAuditOnchain(args: string[], dryRun: boolean, ctx: ToolContext
 
 async function chat(env: ReturnType<typeof loadEnv>, ctx: ToolContext) {
   const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-  console.log(`Agent Wallet on ${ctx.clients.chain.name}. Type "exit" to quit.`);
+  console.log(`Agent Vault on ${ctx.clients.chain.name}. Type "exit" to quit.`);
   while (true) {
     // A fresh readline per turn so the approval prompt can take over stdin cleanly.
     const rl = createInterface({ input: stdin, output: stdout });

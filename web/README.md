@@ -2,7 +2,7 @@
 
 A local multipage interface built with free tools only: Vite, React, React
 Router, Framer Motion, lucide-react icons, Sonner toasts, React Markdown (GFM
-tables in chat) and React CountUp for animated numbers.
+tables in chat), Recharts and qrcode.react.
 
 ## Run it
 
@@ -32,10 +32,10 @@ For hot-reload frontend work, run `npm run dev` in `web/` (port 5173, proxies
 |---|---|
 | Dashboard | KPIs (budget used, rate limit, kill switch, audit chain), holdings, spend meters, recent activity |
 | Agent | Chat with suggested prompts, markdown-formatted replies (tables, lists, linked tx hashes), the agent's tool calls, push-to-talk voice and spoken replies |
-| Transfer | Tier preview for any transfer without the LLM, then submit to the executor |
-| Activity | The full audit trail with filters, explorer links and the hash-chain badge |
-| Security | Tier explanations, limits per asset, allow/deny lists, the role matrix, vault status |
-| Settings | Light, dark or system theme, a voice test, account details, and owner-only team management |
+| Transfer | Tier preview for any transfer without the LLM with the engine's compliant alternative as a one-click amount, then submit to the executor; a batch card for up to 10 transfers checked together |
+| Activity | The full audit trail with filters, explorer links and the hash-chain badge; pending transactions followed until they settle; CSV and compliance-report downloads |
+| Security | Tier explanations, limits per asset, allow/deny lists, the role matrix, vault status, policy fingerprint with drift and pin badges |
+| Settings | Light, dark or system theme, a voice test, account details, two-factor, owner-only recipient lists, address book and team management |
 
 Navigation is a sidebar on desktop and a slide-in drawer on phones. Pages
 animate in and out, and every page sets its own tab title. Animations respect
@@ -61,6 +61,14 @@ The microphone button uses the browser's own speech recognition (Chrome and
 Edge work best), and replies can be read aloud with the browser's speech
 synthesis. No audio reaches the wallet server. Voice only types into the chat:
 approving a T2 always needs an owner's click.
+
+## Accessibility (WCAG 2.2 AA)
+
+A skip link, labelled landmarks, focus that moves to the page after navigation,
+dialogs and the mobile drawer that trap focus, close on Escape and return focus
+to their opener, a keyboard-operable account menu, a polite live region for
+verdicts and results, and AA contrast in both themes. `e2e/wcag.spec.ts` runs
+axe-core over every page in light and dark, plus the keyboard checks, in CI.
 
 ## Recipients and the policy
 

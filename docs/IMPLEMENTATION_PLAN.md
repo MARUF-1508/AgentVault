@@ -1,4 +1,4 @@
-# Agent Wallet: Implementation Plan
+# Agent Vault: Implementation Plan
 
 **Competition:** Shenzhen FinTech International Track, Topic F "Agent Wallet: Autonomous On-chain Wallet"
 **Deadline:** 20 Oct 2026, 23:59 Beijing time (16:00 UTC). Submissions can be updated until then; the latest wins.

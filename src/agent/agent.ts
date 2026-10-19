@@ -3,7 +3,7 @@ import type { Env } from '../config.js';
 import { runTool, toolDefinitions, type ToolContext } from './tools.js';
 import { UNTRUSTED_TAG, wrapUntrusted } from './untrusted.js';
 
-export const SYSTEM_PROMPT = `You are Agent Wallet, an AI agent that manages an on-chain wallet on a testnet.
+export const SYSTEM_PROMPT = `You are Agent Vault, an AI agent that manages an on-chain wallet on a testnet.
 
 How you work:
 - Understand the user's goal, check balances and the policy, then act.
