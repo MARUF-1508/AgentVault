@@ -164,12 +164,14 @@ exact verification results are in `docs/FINAL_STATUS.md`.
 - [x] S8 secret redaction with a test that the key never reaches the audit file.
 - [x] I2 English + Simplified Chinese replies.
 - [x] I4 Telegram approver (opt-in).
-- [ ] B2 ERC-4337 session key: not done. AgentVaultV2 session keys remain the on-chain answer.
+- [x] I4 email approver (opt-in): signed one-time links bound to the request id, confirmation page before deciding (`src/approval/email.ts`).
+- [ ] B2 ERC-4337 session key: not done, documented as future work. AgentVaultV2 session keys remain the on-chain answer.
 - [x] Security: approval ids (TOCTOU), per-user rate limits, Fetch Metadata check, no-store, permissions policy, bounded chat memory, LLM retries.
 - [x] Wallet UX: network indicator, RPC-down banner with retry, RPC fallback transport, `/api/health`.
 - [x] WCAG 2.2 AA: skip link, focus traps, live regions, contrast fixes; axe-core e2e over every page in both themes.
 - [x] CI: `.github/workflows/ci.yml` (typecheck, unit tests, UI build, Playwright + axe, Foundry, Docker build).
-- [ ] First green CI run on GitHub (runs on the first push of the branch).
+- [x] First green CI run on GitHub: run 39200521759 on `73cc57a`, all four jobs green (Foundry 49/49).
+- [ ] Live audit-anchor and batch transactions: blocked on this machine (no `.env`, no funded key); must run where the key lives.
 
 ---
 
