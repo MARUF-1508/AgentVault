@@ -2,10 +2,13 @@ import { erc20Abi, formatEther, formatUnits, parseUnits } from 'viem';
 import type { AuditLog } from '../audit/log.js';
 import type { Clients } from '../chain/client.js';
 import { quoteExactInputSingle } from '../dex/uniswap.js';
-import type { Executor } from '../executor/executor.js';
+import { parseBatch } from '../executor/batch.js';
+import { MAX_BATCH, type Executor } from '../executor/executor.js';
+import { explainTier } from '../policy/alternative.js';
 import { tokenInfo } from '../policy/engine.js';
 import { ActionIntentSchema, SwapIntentSchema, type Policy } from '../policy/types.js';
 import { getPortfolio } from '../portfolio/portfolio.js';
+import { planRebalance } from '../portfolio/rebalance.js';
 import { resolveRecipient } from './resolve.js';
 import type { Schedules } from '../schedule/rules.js';
 import { fetchPaidData } from '../x402.js';
@@ -20,6 +23,28 @@ const actionParams = {
     amount: { type: 'string', description: 'Human-readable decimal amount, e.g. "0.0001". "unlimited" only for approve. For approve, amount "0" revokes a stale allowance.' },
   },
   required: ['kind'],
+  additionalProperties: false,
+} as const;
+
+const batchParams = {
+  type: 'object',
+  properties: {
+    transfers: {
+      type: 'array',
+      maxItems: MAX_BATCH,
+      items: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: '0x address or a saved recipient name' },
+          amount: { type: 'string', description: 'Human-readable decimal amount' },
+          token: { type: 'string', description: 'Token symbol; omit for the native coin' },
+        },
+        required: ['to', 'amount'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['transfers'],
   additionalProperties: false,
 } as const;
 
@@ -130,6 +155,55 @@ export const toolDefinitions = [
       name: 'execute_swap',
       description: 'Swap one policy token for another via the allowlisted DEX. A bounded approval is sent first only if needed, then the swap. Both steps are policy-checked and may need approval.',
       parameters: swapParams,
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'preview_batch',
+      description: `T0 read-only. Policy verdict for several transfers at once (up to ${MAX_BATCH}), each counted as if the earlier ones had already gone through. Nothing is sent.`,
+      parameters: batchParams,
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'execute_batch',
+      description: `Send several transfers (up to ${MAX_BATCH}) in one go, e.g. "pay alice 0.0001 and bob 0.0002". The whole batch is policy-checked first; if any line would be refused, nothing is sent. Lines that need approval still wait for a human.`,
+      parameters: batchParams,
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_transaction_status',
+      description: 'T0 read-only. Status of a transaction this wallet sent: pending, confirmed (with confirmations) or reverted.',
+      parameters: {
+        type: 'object',
+        properties: { hash: { type: 'string', description: '0x-prefixed transaction hash' } },
+        required: ['hash'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'plan_rebalance',
+      description:
+        'T0 read-only. Plan the swaps that move the token portfolio to a target allocation, e.g. {"WETH": 50, "USDC": 50}. Returns steps; run each with execute_swap only after the user agrees.',
+      parameters: {
+        type: 'object',
+        properties: {
+          targets: {
+            type: 'object',
+            description: 'Token symbol -> target percent; must add up to 100.',
+            additionalProperties: { type: 'number' },
+          },
+        },
+        required: ['targets'],
+        additionalProperties: false,
+      },
     },
   },
   {
@@ -256,10 +330,49 @@ async function dispatchTool(name: string, args: Record<string, unknown>, ctx: To
       const parsed = ActionIntentSchema.safeParse(args);
       if (!parsed.success) return { error: 'Invalid transaction', issues: parsed.error.issues.map((i) => i.message) };
       if (name === 'preview_transaction') {
-        const d = await ctx.executor.preview(parsed.data);
-        return { tier: d.tier, reasons: d.reasons };
+        const { decision: d, alternative } = await ctx.executor.previewWithAlternative(parsed.data);
+        return { tier: d.tier, explanation: explainTier(d.tier), reasons: d.reasons, ...alternativeView(alternative) };
       }
-      return executionSummary(await ctx.executor.execute(parsed.data));
+      const result = executionSummary(await ctx.executor.execute(parsed.data));
+      if (result.status !== 'denied') return result;
+      // Refused: offer the engine's own compliant alternative (T1), never a guess.
+      const { alternative } = await ctx.executor.previewWithAlternative(parsed.data);
+      return { ...result, ...alternativeView(alternative) };
+    }
+    case 'preview_batch':
+    case 'execute_batch': {
+      const lines = parseBatch(args.transfers, ctx.policy);
+      if ('error' in lines) return { error: lines.error };
+      if (name === 'preview_batch') {
+        const preview = await ctx.executor.previewBatch(lines.intents);
+        return {
+          lines: preview.map((l) => ({ line: l.index + 1, intent: l.intent, tier: l.decision.tier, reasons: l.decision.reasons })),
+          allowed: preview.every((l) => l.decision.tier !== 'T3_DENY'),
+        };
+      }
+      const r = await ctx.executor.executeBatch(lines.intents);
+      return {
+        preview: r.preview.map((l) => ({ line: l.index + 1, tier: l.decision.tier, reasons: l.decision.reasons })),
+        results: r.results.map(executionSummary),
+        ...(r.results.length === 0 ? { error: 'Batch refused by policy; nothing was sent.' } : {}),
+        ...(r.stoppedAt !== undefined ? { stoppedAtLine: r.stoppedAt + 1 } : {}),
+      };
+    }
+    case 'get_transaction_status': {
+      const hash = String(args.hash ?? '');
+      if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return { error: 'hash must be a 0x-prefixed 32-byte transaction hash.' };
+      return ctx.executor.txStatus(hash as `0x${string}`);
+    }
+    case 'plan_rebalance': {
+      const targets = args.targets;
+      if (!targets || typeof targets !== 'object' || Array.isArray(targets)) return { error: 'targets must be an object like {"WETH": 50, "USDC": 50}.' };
+      const parsedTargets: Record<string, number> = {};
+      for (const [k, v] of Object.entries(targets as Record<string, unknown>).slice(0, 10)) {
+        if (typeof v !== 'number') return { error: `Target for ${k} must be a number.` };
+        parsedTargets[k.slice(0, 20)] = v;
+      }
+      const portfolio = await getPortfolio(ctx.clients, ctx.policy);
+      return planRebalance(portfolio.holdings, parsedTargets, ctx.policy);
     }
     case 'execute_swap':
       return executeSwap(args, ctx);
@@ -312,7 +425,22 @@ async function dispatchTool(name: string, args: Record<string, unknown>, ctx: To
 }
 
 function executionSummary(r: Awaited<ReturnType<Executor['execute']>>) {
-  return { status: r.status, tier: r.decision.tier, reasons: r.decision.reasons, txHash: r.txHash, explorerUrl: r.explorerUrl, error: r.error };
+  return {
+    status: r.status,
+    tier: r.decision.tier,
+    explanation: explainTier(r.decision.tier),
+    reasons: r.decision.reasons,
+    txHash: r.txHash,
+    explorerUrl: r.explorerUrl,
+    error: r.error,
+  };
+}
+
+/** The engine's alternative, shaped for the model: a ready-to-use intent or why there is none. */
+function alternativeView(a: Awaited<ReturnType<Executor['previewWithAlternative']>>['alternative']) {
+  if (!a) return {};
+  if (a.kind === 'none') return { alternative: { available: false, note: a.note } };
+  return { alternative: { available: true, intent: a.intent, tier: a.decision.tier, note: a.note } };
 }
 
 /** A safe page size from untrusted model input: an integer in [1, max], else the default. */
