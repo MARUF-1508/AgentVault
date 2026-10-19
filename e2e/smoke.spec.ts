@@ -110,6 +110,20 @@ test('recipient lists give the label its own column and never overlap the button
   await expect(card.getByLabel('Address', { exact: true })).toBeVisible();
 });
 
+test('the agent page fits a phone viewport', async ({ page }) => {
+  await ensureSignedIn(page);
+
+  await page.getByRole('link', { name: 'Agent', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Agent' })).toBeVisible();
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect(page.locator('.chat')).toBeVisible();
+
+  // Regression guard: a plain 1fr track took its min-content width from the
+  // chat card, so both cards overflowed a 360px screen by 19px.
+  const scrollW = await page.evaluate(() => document.scrollingElement!.scrollWidth);
+  expect(scrollW, 'the Agent page does not scroll horizontally at phone width').toBeLessThanOrEqual(361);
+});
+
 test('the receive dialog closes with Escape', async ({ page }) => {
   await ensureSignedIn(page);
 

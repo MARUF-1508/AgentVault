@@ -119,7 +119,9 @@ p { margin: 0.4rem 0; }
 .page-head p { max-width: 62ch; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }
 .grid-side { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
-@media (max-width: 900px) { .grid-2, .grid-side { grid-template-columns: 1fr; } }
+/* minmax(0, 1fr) lets the single column shrink below a card's min-content
+   width; plain 1fr grew the Agent page past the viewport at phone widths. */
+@media (max-width: 900px) { .grid-2, .grid-side { grid-template-columns: minmax(0, 1fr); } }
 .grid-2 > * > .card, .grid-2 > .card { margin-bottom: 0; height: 100%; }
 
 .row { display: flex; gap: 0.5rem; align-items: center; }
