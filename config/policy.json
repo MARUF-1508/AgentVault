@@ -57,6 +57,6 @@
   },
   "rateLimit": {
     "maxTxPerHour": 10,
-    "velocity": { "windowMinutes": 10, "maxTx": 5, "maxSpendPct": 50 }
+    "velocity": { "windowMinutes": 10, "maxTx": 8, "maxSpendPct": 50 }
   }
 }

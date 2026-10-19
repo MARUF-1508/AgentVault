@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { generatePrivateKey } from 'viem/accounts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearSecrets, redact, redactText, registerSecret, REDACTED } from '../src/audit/redact.js';
 import { harness } from './helpers.js';
 
-// A throwaway, well-known test key (Anvil/Hardhat account #0). Never a real one.
-const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+// A fresh random key per run: no key material is committed, even a test one.
+const KEY = generatePrivateKey();
 
 afterEach(() => clearSecrets());
 

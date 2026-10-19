@@ -15,6 +15,7 @@ import { makeClients } from './chain/client.js';
 import { loadEnv, loadPolicy } from './config.js';
 import { parseBatch } from './executor/batch.js';
 import { Executor } from './executor/executor.js';
+import { explainTier } from './policy/alternative.js';
 import { tokenInfo } from './policy/engine.js';
 import { addDenied, addRecipient, removeDenied, removeRecipient, writePolicyAtomic } from './policy/edit.js';
 import { policyFileHash } from './policy/integrity.js';
@@ -165,7 +166,10 @@ async function main() {
     case 'send': {
       const [to, amount, token] = args;
       const intent = parseIntent(token ? { kind: 'erc20_transfer', to, amount, token } : { kind: 'native_transfer', to, amount });
-      if (cmd === 'preview') return print(await executor.preview(intent));
+      if (cmd === 'preview') {
+        const { decision, alternative } = await executor.previewWithAlternative(intent);
+        return print({ ...decision, explanation: explainTier(decision.tier), ...(alternative ? { alternative } : {}) });
+      }
       return print(await executor.execute(intent, { dryRun, task, taskMax }));
     }
     case 'approve': {

@@ -41,8 +41,9 @@ export function renderEvidence(entries: AuditEntry[], opts: EvidenceOptions): st
   const rows = sent.map((e) => {
     const i = (e.data.intent ?? {}) as Record<string, unknown>;
     const kind = String(i.kind ?? '?');
-    // The amount lives under a different key per intent: swaps carry amountIn.
-    const amount = String(i.amount ?? i.amountIn ?? '?');
+    // The amount lives under a different key per intent: swaps carry amountIn;
+    // an audit anchor moves nothing and names the entry it commits to.
+    const amount = kind === 'audit_anchor' ? `0 (audit entry #${String(i.seq)})` : String(i.amount ?? i.amountIn ?? '?');
     const h = String(e.data.hash);
     return `| ${e.ts} | ${kind} | ${amount} ${e.data.asset} | ${e.data.tier} | ${outcome.get(h) ?? 'pending'} | [${h.slice(0, 10)}…](${e.data.explorerUrl}) |`;
   });
