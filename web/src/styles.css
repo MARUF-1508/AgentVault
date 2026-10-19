@@ -383,8 +383,15 @@ th.mine { color: var(--accent-2); }
 @keyframes drift { to { transform: translate(4%, -3%) scale(1.06); } }
 .login-card { width: min(420px, 100%); text-align: center; position: relative; padding: 1.8rem 1.5rem; }
 .login-card h1 { font-size: 1.4rem; margin-top: 0.8rem; }
-.stack-form { display: grid; gap: 0.8rem; margin-top: 1.2rem; text-align: left; }
+.stack-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.8rem; margin-top: 1.2rem; text-align: left; }
 .stack-form label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); }
+/* Phone width: two side-by-side inputs are wider than the card, and the auto
+   grid track used to stretch every sibling to their max-content size. */
+@media (max-width: 600px) {
+  .stack-form .row { flex-wrap: wrap; }
+  .stack-form .row > input { flex: 1 1 100%; }
+  .stack-form .row > button { flex: 1 1 auto; }
+}
 .input-icon { position: relative; display: flex; align-items: center; }
 .input-icon > svg { position: absolute; left: 0.7rem; color: var(--muted); pointer-events: none; }
 .input-icon input { width: 100%; padding-left: 2.2rem; }

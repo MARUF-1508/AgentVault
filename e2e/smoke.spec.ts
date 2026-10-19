@@ -67,6 +67,9 @@ test('recipient lists give the label its own column and never overlap the button
   const heading = page.getByRole('heading', { name: 'Recipients', exact: true });
   await expect(heading).toBeVisible();
   const card = page.locator('.card', { has: heading });
+  // Reduced motion is on for the whole suite: off-screen Reveal content must
+  // already be at full opacity instead of waiting for a scroll event.
+  await expect(page.locator('[data-reveal]', { has: heading })).toHaveCSS('opacity', '1');
   await card.scrollIntoViewIfNeeded();
 
   // Regression guard: the labels used to fall into the 28px avatar column of
@@ -97,6 +100,14 @@ test('recipient lists give the label its own column and never overlap the button
     expect(deniedAddr, 'the denylist row renders an address').not.toBeNull();
     expect(deniedAddr!.width).toBeGreaterThanOrEqual(180);
   }
+
+  // Regression guard: the two side-by-side inputs in "Add a known recipient"
+  // used to force the whole card (and the page) to 475px at a 390px viewport.
+  const mobileScrollW = await page.evaluate(() => document.scrollingElement!.scrollWidth);
+  expect(mobileScrollW, 'Settings does not scroll horizontally at phone width').toBeLessThanOrEqual(391);
+  await page.getByRole('heading', { name: 'Add a known recipient' }).scrollIntoViewIfNeeded();
+  await expect(card.getByLabel('Label')).toBeVisible();
+  await expect(card.getByLabel('Address', { exact: true })).toBeVisible();
 });
 
 test('the receive dialog closes with Escape', async ({ page }) => {
