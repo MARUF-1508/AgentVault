@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, LogOut, Menu, Moon, OctagonPause, RefreshCw, Search, ShieldAlert, Sun, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useFocusTrap } from '../a11y';
 import { NavLink, useLocation, useOutlet } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import { pause } from '../api';
 import { ApprovalProvider, useApproval } from '../approval';
 import { useAuth } from '../auth';
 import ApprovalModal from '../components/ApprovalModal';
+import AssetIcon from '../components/AssetIcon';
 import CommandPalette from '../components/CommandPalette';
 import ResumeWallet from '../components/ResumeWallet';
 import OfflineBanner from '../components/OfflineBanner';
@@ -190,13 +191,23 @@ function ApprovalPill() {
   );
 }
 
+const ASSET_NAMES: Record<string, string> = {
+  ETH: 'Ether',
+  WETH: 'Wrapped Ether',
+  USDC: 'USD Coin',
+};
+
 /**
  * MetaMask-style network indicator: which chain, and whether its RPC answers.
- * Clicking it re-checks immediately. Degraded means read data may be stale;
- * the policy engine still refuses anything it cannot price or simulate.
+ * Clicking it re-checks immediately; hovering shows the assets this wallet can
+ * hold and spend on that chain, straight from the policy file. Degraded means
+ * read data may be stale; the policy engine still refuses anything it cannot
+ * price or simulate.
  */
 function NetworkIndicator({ compact = false }: { compact?: boolean }) {
-  const { status, health, healthError, refresh } = useWallet();
+  const { status, health, healthError, refresh, policy } = useWallet();
+  const assets = policy ? [policy.native.symbol, ...Object.keys(policy.tokens)] : [];
+  const assetsId = useId();
   const ok = health?.rpc.ok ?? false;
   const label = health ? (ok ? 'Connected' : 'RPC unreachable') : healthError ? 'Server unreachable' : 'Checking…';
   const chain = health?.chain ?? status?.chain ?? 'Network';
@@ -204,20 +215,44 @@ function NetworkIndicator({ compact = false }: { compact?: boolean }) {
     ? `Block ${health.rpc.blockNumber} · ${health.rpc.latencyMs} ms`
     : (health?.rpc.error ?? healthError ?? 'Checking the chain connection');
   return (
-    <button
-      type="button"
-      className={`net ${ok ? 'net-ok' : health || healthError ? 'net-bad' : ''} ${compact ? 'net-compact' : ''}`}
-      onClick={refresh}
-      title={`${detail}. Click to re-check.`}
-    >
-      {/* The accessible name starts with the visible text (WCAG 2.5.3); the rest is screen-reader only. */}
-      <span className={`dot ${ok ? 'ok' : health || healthError ? 'bad' : ''}`} aria-hidden />
-      <span>{chain}</span>
-      {!compact && <span className="muted small hide-sm">{ok ? `#${health!.rpc.blockNumber}` : label}</span>}
-      <span className="sr-only">
-        {compact || ok ? `, ${label}` : ''}. {detail}. Re-check the connection.
-      </span>
-    </button>
+    <span className="net-wrap">
+      <button
+        type="button"
+        className={`net ${ok ? 'net-ok' : health || healthError ? 'net-bad' : ''} ${compact ? 'net-compact' : ''}`}
+        onClick={refresh}
+        title={`${detail}. Click to re-check.`}
+        {...(!compact && assets.length > 0 ? { 'aria-describedby': assetsId } : {})}
+      >
+        {/* The accessible name starts with the visible text (WCAG 2.5.3); the rest is screen-reader only. */}
+        <span className={`dot ${ok ? 'ok' : health || healthError ? 'bad' : ''}`} aria-hidden />
+        <span>{chain}</span>
+        {!compact && <span className="muted small hide-sm">{ok ? `#${health!.rpc.blockNumber}` : label}</span>}
+        {!compact && assets.length > 0 && <ChevronDown className="net-caret" size={13} aria-hidden />}
+        <span className="sr-only">
+          {compact || ok ? `, ${label}` : ''}. {detail}. Re-check the connection.
+        </span>
+      </button>
+      {!compact && assets.length > 0 && (
+        <span className="net-assets" id={assetsId} role="tooltip">
+          <span className="net-assets-title">Supported assets</span>
+          <span className="net-asset-list">
+            {assets.map((asset) => {
+              const name = ASSET_NAMES[asset] ?? asset;
+              return (
+                <span className="net-asset" key={asset} title={`${name} (${asset})`}>
+                  <AssetIcon asset={asset} />
+                  <span className="net-asset-text">
+                    <strong>{asset}</strong>
+                    <small className="muted">{name}</small>
+                  </span>
+                </span>
+              );
+            })}
+          </span>
+          <span className="net-assets-note muted small">On {chain}. Policy limits apply per asset.</span>
+        </span>
+      )}
+    </span>
   );
 }
 

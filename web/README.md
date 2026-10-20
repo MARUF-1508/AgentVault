@@ -38,7 +38,9 @@ For hot-reload frontend work, run `npm run dev` in `web/` (port 5173, proxies
 | Security | Tier explanations, limits per asset, allow/deny lists, the role matrix, vault status, policy fingerprint with drift and pin badges, a read-only **policy simulator** (what-if) and **on-chain audit anchors** (anchor/verify) |
 | Settings | Light, dark or system theme, a voice test, account details, two-factor, owner-only recipient lists, address book, team management and the signing-key card (generate/rotate) |
 
-Navigation is a sidebar on desktop and a slide-in drawer on phones. Pages
+Navigation is a sidebar on desktop and a slide-in drawer on phones. Hovering the
+network name in the top bar lists the supported assets with icons, symbols and
+full names, read from the policy file. Pages
 animate in and out, and every page sets its own tab title. Animations respect
 the system's reduced-motion setting.
 

@@ -176,3 +176,19 @@ test('an owner can pause and resume from the UI, with the password', async ({ pa
   await dialog.getByRole('button', { name: /resume and allow signing/i }).click();
   await expect(page.getByText(/kill switch is on/i)).toBeHidden();
 });
+
+test('hovering the network name shows the supported assets with icons and names', async ({ page }) => {
+  await ensureSignedIn(page);
+
+  const net = page.locator('.topbar .net');
+  await net.hover();
+  const assets = page.locator('.topbar .net-assets');
+  await expect(assets).toBeVisible();
+  await expect(assets.locator('.net-assets-title')).toHaveText('Supported assets');
+  await expect(assets.locator('.net-asset-text strong')).toHaveText(['ETH', 'USDC', 'WETH']);
+  await expect(assets.locator('.net-asset-text small')).toHaveText(['Ether', 'USD Coin', 'Wrapped Ether']);
+  await expect(assets.locator('.asset-icon')).toHaveCount(3);
+
+  await page.mouse.move(0, 0);
+  await expect(assets).toBeHidden();
+});

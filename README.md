@@ -101,7 +101,7 @@ actions and 5 policy refusals: [`docs/EXECUTION_EVIDENCE.md`](docs/EXECUTION_EVI
 | Two-line batch payment (both T1, both confirmed) | [`0xb6245068…`](https://sepolia.basescan.org/tx/0xb62450685da34f2794f92e1361d8c22e55ed4adfd0c80c28fedc582d3d8c39bc) · [`0xeca94314…`](https://sepolia.basescan.org/tx/0xeca9431472290ff0c1e5d8d663b74245e24ec1b0bcfa46321afdd3f6d214495c) ✅ |
 | ERC-4337 account deployed + session-key userOp through EntryPoint v0.7 | [`0x71c45789…` account](https://sepolia.basescan.org/address/0x71c457899cd25f52e4e49dacdcc84f890c1ea98c) · [userOp tx](https://sepolia.basescan.org/tx/0x164877c9b480a2ac77fd5c14540b8df9562340f68f71ab212ae5423576d0d6c1) ✅ |
 
-Tests: 324 unit (vitest) · 13 end-to-end incl. WCAG 2.2 AA (Playwright + axe) ·
+Tests: 324 unit (vitest) · 14 end-to-end incl. WCAG 2.2 AA (Playwright + axe) ·
 69 contract (Foundry), all run in CI on every push.
 
 ## What it can do
@@ -255,7 +255,8 @@ never a shortcut around the policy engine:
 | `audit anchor` / `audit verify --onchain` | Security → On-chain audit anchors |
 | `recipient` / `deny` / `user` | Settings → Recipients / Address book / Team |
 
-The top bar shows the network and RPC health (click to re-check); if the RPC
+The top bar shows the network and RPC health (click to re-check; hover the
+network name to see the supported assets with icons and full names); if the RPC
 is down a banner says what still works and offers a retry. Transfer has a batch
 card, Allowance and Swap tabs, and offers the engine's compliant alternative as
 a one-click amount;

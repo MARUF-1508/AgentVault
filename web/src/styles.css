@@ -487,6 +487,21 @@ kbd { font: 0.72rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0
 .net.net-ok { border-color: color-mix(in srgb, var(--good) 55%, var(--border)); }
 .net.net-bad { border-color: var(--bad); color: var(--bad); background: var(--bad-bg); }
 .net-compact { padding: 0.2rem 0.55rem; font-size: 0.75rem; }
+.net-caret { opacity: 0.6; margin-left: -0.15rem; }
+.net-wrap { position: relative; display: inline-flex; }
+/* Hovering the network name reveals the assets the policy supports. */
+.net-wrap::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 0.55rem; }
+.net-assets { position: absolute; top: calc(100% + 0.5rem); left: 0; z-index: 30; width: 15.5rem; display: grid; gap: 0.45rem; padding: 0.65rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); text-align: left; opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s; pointer-events: none; }
+.net-wrap:hover .net-assets, .net-wrap:focus-within .net-assets { opacity: 1; visibility: visible; transform: none; pointer-events: auto; }
+.net-assets-title { font-size: 0.68rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding: 0 0.35rem; }
+.net-asset-list { display: grid; gap: 0.1rem; }
+.net-asset { display: flex; align-items: center; gap: 0.55rem; padding: 0.35rem; border-radius: 8px; }
+.net-asset:hover { background: var(--surface-2); }
+.net-asset .asset-icon { width: 24px; height: 24px; font-size: 0.7rem; flex: 0 0 auto; }
+.net-asset-text { display: flex; flex-direction: column; line-height: 1.2; }
+.net-asset-text strong { font-size: 0.8rem; }
+.net-asset-text small { font-size: 0.7rem; }
+.net-assets-note { padding: 0 0.35rem; }
 .sidebar-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .banner.warn { justify-content: space-between; flex-wrap: wrap; gap: 0.6rem; padding: 0.5rem 24px; }
 
