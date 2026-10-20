@@ -17,6 +17,9 @@ const EnvSchema = z.object({
     .string()
     .regex(/^0x[0-9a-fA-F]{64}$/, 'AGENT_PRIVATE_KEY must be a 0x-prefixed 32-byte hex key')
     .optional(),
+  // File the UI's wallet generator writes to. Kept configurable so a test or a
+  // container can point it at a scratch file instead of the repository's .env.
+  ENV_FILE: z.string().default('.env'),
   LLM_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   LLM_API_KEY: z.string().optional(),
   LLM_MODEL: z.string().default('gpt-4o-mini'),

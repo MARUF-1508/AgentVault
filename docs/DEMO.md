@@ -75,8 +75,9 @@ control (not on the allowlist).
 ## 3:45 — Kill switch + audit evidence
 
 1. Click **Pause** in the UI (owner-only). Attempt any transfer → T3
-   "paused". Resume from the CLI only: `npm run cli -- resume`.
-   > "The UI can tighten, never loosen."
+   "paused". Click **Resume signing** and re-enter the owner password (the CLI
+   also works: `npm run cli -- resume`); both directions land in the audit log.
+   > "The kill switch is one click; releasing it needs the owner's password."
 2. Activity page → **Export CSV**; show the hash-chained log.
    `npm run cli -- audit verify` prints **chain intact**.
 3. `npm run evidence` regenerates `docs/EXECUTION_EVIDENCE.md`; open it: every

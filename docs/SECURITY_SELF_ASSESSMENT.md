@@ -38,7 +38,7 @@ Evaluation order: kill switch → chain → rate limit → velocity (tx count) �
 | Hash-chained tamper-evident audit log | ✅ |
 | Budget derived from the audit log; failed txs still count | ✅ |
 | Concurrent budget safety: an execution reserves its amount before re-checking and broadcasting, so a second concurrent request cannot spend the same budget (no overdraft) | ✅ |
-| Kill switch (`pause`); the web UI can pause but only the CLI can resume, and both are audit-logged | ✅ |
+| Kill switch (`pause`); the web UI can pause, and an owner can resume only with the password again (CLI also works); both directions are audit-logged | ✅ |
 | Web server refuses foreign `Host`/`Origin` and non-JSON POSTs (no cross-site approval or transfer); unanswered T2 approvals auto-reject after two minutes; a waiting T2 opens the approval dialog by itself and the owner may minimise it to read on (the top-bar pill reopens it), which changes nothing — the slot still expires server-side and fails closed, and only an owner can answer | ✅ |
 | Web sign-in: scrypt-hashed passwords, HttpOnly SameSite=Strict session cookie, failed-login throttle; first-run setup creates the first owner, owners manage accounts (audited, sessions killed on removal), CLI also works | ✅ |
 | Recipient allow/deny lists are editable only by an owner, over HTTP routes or the CLI, never by a tool the LLM can call. Hand-editing `config/policy.json` (the previous and only way) was unaudited and unchecked; every change now goes through the same audit log with the owner's name, and the policy fingerprint the UI shows is recomputed per request so it cannot go stale | ✅ |

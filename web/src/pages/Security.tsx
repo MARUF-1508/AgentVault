@@ -2,6 +2,8 @@ import { motion } from 'framer-motion';
 import { Ban, CheckCircle2, Eye, Fingerprint, Hand, Landmark } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useAuth } from '../auth';
+import AuditAnchor from '../components/AuditAnchor';
+import PolicySimulator from '../components/PolicySimulator';
 import { useWallet } from '../data';
 import { CopyButton, shortAddr, usePageTitle } from '../format';
 
@@ -18,7 +20,9 @@ const ROLE_ROWS: [string, boolean, boolean, boolean][] = [
   ['Chat with the agent (text or voice)', false, true, true],
   ['Approve or reject T2 transactions', false, false, true],
   ['Pause the wallet (kill switch)', false, false, true],
-  ['Resume, change limits or add users', false, false, false],
+  ['Resume signing (password again)', false, false, true],
+  ['Rotate the signing key or add users', false, false, true],
+  ['Change limits in the policy file', false, false, false],
 ];
 
 export default function Security() {
@@ -134,7 +138,7 @@ export default function Security() {
               </tbody>
             </table>
           </div>
-          <p className="muted small">The server checks the role on every request; hiding buttons is only a convenience. The last row is CLI-only for everyone.</p>
+          <p className="muted small">The server checks the role on every request; hiding buttons is only a convenience. Limits and the policy file are never editable from the app or the model.</p>
         </section>
 
         <section className="card">
@@ -187,6 +191,11 @@ export default function Security() {
             </p>
           )}
         </section>
+      </div>
+
+      <div className="grid-2">
+        <PolicySimulator />
+        <AuditAnchor />
       </div>
     </>
   );

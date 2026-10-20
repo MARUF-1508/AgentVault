@@ -1,4 +1,4 @@
-# Final status: `main` (19 Oct 2026)
+# Final status: `main` (20 Oct 2026)
 
 PR #4 merged `feat/final-upgrade` into `main` at `8898cac`. `main` already
 contained `feat/ui-ux-refresh` (PR #2, 17 Oct: multipage UI, sign-in and RBAC,
@@ -6,15 +6,20 @@ voice) and PR #3 (AgentVaultV2, reservation ledger, x402 v2, what-if), so
 nothing needed merging. No deployed contract was changed and no evidence hash
 was touched.
 
+The final commit before the deadline brings every CLI-only operation into the
+web UI at the same security level: pause → resume (owner password again),
+key generation/rotation, allowance approve/revoke, swap, scheduled rules,
+what-if, the x402 demo and audit anchoring. The counts below include it.
+
 ## Verified results
 
 | Check | Where | Result |
 |---|---|---|
 | Typecheck (agent, CLI, tests) | local, `npm run typecheck` | clean |
-| Unit + integration tests | local, `npm test` | **314 passed / 314**, 38 files (baseline before this branch: 232 / 24 files) |
+| Unit + integration tests | local, `npm test` | **324 passed / 324**, 40 files (baseline before this branch: 232 / 24 files) |
 | Typecheck (web UI) | local, `npm --prefix web run typecheck` | clean |
 | UI production build | local, `npm --prefix web run build` | built, no chunk-size warning (pages are lazy-loaded) |
-| End-to-end + WCAG 2.2 AA | local, `npm run e2e` (bundled Chromium) | **12 passed / 12**: 7 smoke flows (incl. phone-width overflow guards and the agent hand-off layout), axe-core over the sign-in page and all 6 app pages in light **and** dark, keyboard contract, live region |
+| End-to-end + WCAG 2.2 AA | local, `npm run e2e` (bundled Chromium) | **13 passed / 13**: 8 smoke flows (incl. phone-width overflow guards, the agent hand-off layout and pause→resume with the password), axe-core over the sign-in page and all 7 app pages in light **and** dark, keyboard contract, live region |
 | GitHub Actions CI | runs `39241874743` (push) and `39241879886` (PR #4) on commit `378037a` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (10/10), Foundry (69/69), Docker build |
 | Foundry contract tests | CI `contracts` job and local `forge test` | **69 passed / 69** (AgentVault v1: 12, AgentVaultV2: 37, SessionKeyAccount: 20); Foundry was installed locally before the final run and the full suite passes there too |
 | Lockfiles | local, `npm ci` (root and `web/`) | install cleanly |

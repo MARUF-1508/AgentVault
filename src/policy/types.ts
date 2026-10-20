@@ -123,7 +123,8 @@ export type Intent =
   /**
    * Commit the audit log's head hash on-chain (S2): a zero-value transaction to
    * the wallet itself whose calldata carries the hash. Never offered to the LLM
-   * (not in ActionIntentSchema); only the CLI builds it.
+   * (not in ActionIntentSchema); only the CLI and the owner-only anchor route
+   * build it.
    */
   | { kind: 'audit_anchor'; seq: number; headHash: string };
 

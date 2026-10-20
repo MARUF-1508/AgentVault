@@ -32,10 +32,11 @@ For hot-reload frontend work, run `npm run dev` in `web/` (port 5173, proxies
 |---|---|
 | Dashboard | KPIs (budget used, rate limit, kill switch, audit chain), holdings, spend meters, recent activity |
 | Agent | Chat with suggested prompts, markdown-formatted replies (tables, lists, linked tx hashes), the agent's tool calls, push-to-talk voice and spoken replies |
-| Transfer | Tier preview for any transfer without the LLM with the engine's compliant alternative as a one-click amount, then submit to the executor; a batch card for up to 10 transfers checked together |
+| Transfer | Tier preview for any transfer without the LLM with the engine's compliant alternative as a one-click amount, then submit to the executor; a batch card for up to 10 transfers checked together; **Allowance** (approve/revoke), **Swap** (quote + policy-checked swap) and a paid-API (x402) card |
+| Automation | The scheduled/conditional rules the server runs (or dry-runs); each run is a normal intent through the executor and policy engine |
 | Activity | The full audit trail with filters, explorer links and the hash-chain badge; pending transactions followed until they settle; CSV and compliance-report downloads |
-| Security | Tier explanations, limits per asset, allow/deny lists, the role matrix, vault status, policy fingerprint with drift and pin badges |
-| Settings | Light, dark or system theme, a voice test, account details, two-factor, owner-only recipient lists, address book and team management |
+| Security | Tier explanations, limits per asset, allow/deny lists, the role matrix, vault status, policy fingerprint with drift and pin badges, a read-only **policy simulator** (what-if) and **on-chain audit anchors** (anchor/verify) |
+| Settings | Light, dark or system theme, a voice test, account details, two-factor, owner-only recipient lists, address book, team management and the signing-key card (generate/rotate) |
 
 Navigation is a sidebar on desktop and a slide-in drawer on phones. Pages
 animate in and out, and every page sets its own tab title. Animations respect
@@ -47,13 +48,14 @@ the system's reduced-motion setting.
 |---|---|
 | viewer | read balances, policy, budgets and the audit trail |
 | operator | viewer, plus preview, submit transfers and chat with the agent |
-| owner | operator, plus approve or reject T2 and pause the wallet |
+| owner | operator, plus approve or reject T2, pause the wallet, resume it with the password again, rotate the signing key and manage accounts/recipients |
 
 The server checks the role on every request (`src/auth/rbac.ts`). Hiding
-buttons in the UI is only a convenience. No role can resume the wallet or
-change limits; only an owner can add or remove accounts (Settings → Team),
-and that first-run setup window exists only while zero accounts do. The agent's
-LLM has no tool that can touch accounts, roles or the kill switch.
+buttons in the UI is only a convenience. Resuming requires the owner's password
+on top of the owner role; no role can change limits, and only an owner can
+rotate the key or add/remove accounts (Settings → Team). That first-run setup
+window exists only while zero accounts do. The agent's LLM has no tool that
+can touch accounts, roles, limits or the kill switch.
 
 ## Voice
 

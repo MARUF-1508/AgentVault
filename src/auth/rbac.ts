@@ -5,12 +5,14 @@
  * viewer   : read balances, policy, budgets and the audit trail.
  * operator : viewer + preview, submit transfers and chat with the agent.
  *            T2 transactions still wait for an owner's approval.
- * owner    : operator + approve/reject T2, pause the wallet and manage web
+ * owner    : operator + approve/reject T2, pause the wallet, resume it (with
+ *            the password again), rotate the signing key and manage web
  *            accounts (admin). New accounts are never self-served: only an
  *            owner can add one, and only the first owner can be created
  *            during first-run setup.
  *
- * No role can change the policy, resume a paused wallet or touch keys.
+ * No role can change the policy, and the LLM gets no pause, resume, key or
+ * account tool.
  */
 export const ROLES = ['viewer', 'operator', 'owner'] as const;
 export type Role = (typeof ROLES)[number];

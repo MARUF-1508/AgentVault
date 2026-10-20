@@ -35,6 +35,8 @@ export default defineConfig({
       AUDIT_LOG: `${E2E_DIR}/audit.jsonl`,
       PAUSE_FILE: `${E2E_DIR}/PAUSED`,
       SCHEDULES_FILE: `${E2E_DIR}/schedules.json`,
+      // Never let a test click "generate wallet" and overwrite the repo .env.
+      ENV_FILE: `${E2E_DIR}/.env`,
       VAULT: 'false',
       // A fresh random key per run: the UI gets a wallet address (receive QR,
       // portfolio) without any key living in the repo. It is never funded, so

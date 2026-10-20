@@ -14,6 +14,7 @@ const PAGES = [
   { path: '/', heading: /welcome back/i },
   { path: '/agent', heading: 'Agent' },
   { path: '/transfer', heading: 'Transfer' },
+  { path: '/automation', heading: 'Automation' },
   { path: '/activity', heading: 'Activity' },
   { path: '/security', heading: 'Security' },
   { path: '/settings', heading: 'Settings' },

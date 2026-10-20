@@ -228,14 +228,19 @@ describe('web server', () => {
     });
   });
 
-  it('pauses the wallet from the UI and logs it; there is no resume route', async () => {
+  it('pauses from the UI and resumes only with the owner password again', async () => {
     const r = await postJson('/api/pause', {});
     expect(await r.json()).toEqual({ paused: true });
     expect(existsSync(env.PAUSE_FILE)).toBe(true);
     expect(appends).toContainEqual({ type: 'kill_switch', data: { paused: true, by: 'web', user: 'olivia' } });
     expect((await (await authed(`${base}/api/status`)).json()).paused).toBe(true);
-    expect((await postJson('/api/resume', {})).status).toBe(404);
-    rmSync(env.PAUSE_FILE, { force: true });
+
+    expect((await postJson('/api/resume', {})).status).toBe(400);
+    expect((await postJson('/api/resume', { password: 'wrong-password' })).status).toBe(401);
+    const ok = await postJson('/api/resume', { password: PASSWORDS.owner });
+    expect(await ok.json()).toEqual({ paused: false });
+    expect(existsSync(env.PAUSE_FILE)).toBe(false);
+    expect(appends).toContainEqual({ type: 'kill_switch', data: { paused: false, by: 'web', user: 'olivia' } });
   });
 
   it('reports no pending approval and rejects decide with nothing waiting', async () => {

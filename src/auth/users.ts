@@ -24,9 +24,9 @@ const hashPassword = (password: string, salt: string) => scryptSync(password, sa
 
 /**
  * Local web-UI accounts in a git-ignored JSON file. Passwords are stored as
- * scrypt hashes with a per-user salt and compared in constant time. Accounts
- * are managed from the CLI only (`user add|list|remove`); neither the web UI
- * nor the LLM can create or change them.
+ * scrypt hashes with a per-user salt and compared in constant time. An owner
+ * manages them from Settings → Team or the CLI (`user add|list|remove`); the
+ * LLM has no tool that can create or change them.
  */
 export class UserStore {
   constructor(private readonly path: string) {}

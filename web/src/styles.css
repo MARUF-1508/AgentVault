@@ -81,6 +81,8 @@ p { margin: 0.4rem 0; }
 .banner { margin: 0; padding: 0.55rem 24px; font-size: 0.875rem; }
 .banner.bad { background: var(--bad-bg); color: var(--bad); border-bottom: 1px solid var(--bad); }
 .banner.warn { display: flex; align-items: center; gap: 0.4rem; background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid var(--warn); }
+.link-btn { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; box-shadow: none; }
+.link-btn:hover { filter: none; box-shadow: none; text-decoration-thickness: 2px; }
 .totp-setup { align-items: flex-start; gap: 1rem; }
 .totp-qr { display: inline-flex; background: #fff; padding: 8px; border-radius: 10px; }
 .sessions-line { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
@@ -496,6 +498,17 @@ kbd { font: 0.72rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0
 .alternative svg { color: var(--accent-2); flex: none; margin-top: 0.15rem; }
 .approval .call { overflow-wrap: anywhere; background: var(--surface-2); border-radius: 8px; padding: 0.3rem 0.45rem; }
 .integrity-row { flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.check-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+.allowance-amount { display: grid; gap: 0.5rem; }
+.allowance-amount > label:first-child { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); }
+.transfer-tabs { margin-bottom: 0.9rem; }
+.check-list { display: grid; gap: 0.45rem; }
+.whatif-result { margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+label.check-row, .stack-form label.check-row { display: flex; align-items: center; gap: 0.4rem; }
+.check-row input { width: auto; flex: 0 0 auto; margin: 0; }
+.step-list { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; gap: 0.45rem; }
+.step-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; font-size: 0.875rem; }
+.json-out { max-height: 260px; overflow: auto; padding: 0.7rem; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); margin-top: 0.8rem; }
 
 /* ---- Batch payments ---- */
 .batch-rows { list-style: none; margin: 0.6rem 0; padding: 0; display: grid; gap: 0.5rem; counter-reset: line; }

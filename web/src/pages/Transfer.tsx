@@ -1,9 +1,13 @@
 import { useAuth } from '../auth';
+import AllowanceForm from '../components/AllowanceForm';
 import BatchCard from '../components/BatchCard';
 import PolicyCheck from '../components/PolicyCheck';
+import SwapForm from '../components/SwapForm';
+import X402Card from '../components/X402Card';
 import { BudgetMeters } from '../components/Portfolio';
 import { useWallet } from '../data';
 import { usePageTitle } from '../format';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 export default function Transfer() {
@@ -16,6 +20,7 @@ export default function Transfer() {
   const to = params.get('to') ?? undefined;
   const amount = params.get('amount') ?? undefined;
   const asset = params.get('asset') ?? undefined;
+  const [mode, setMode] = useState<'send' | 'allowance' | 'swap'>('send');
   return (
     <>
       <div className="page-head">
@@ -33,13 +38,23 @@ export default function Transfer() {
               Reviewing <span className="mono">{to}</span> from the Agent page. It is not a known recipient, so expect T2 and an approval step.
             </p>
           )}
+          <div className="segmented transfer-tabs" role="tablist" aria-label="Transfer type">
+            {(['send', 'allowance', 'swap'] as const).map((m) => (
+              <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)}>
+                {m === 'send' ? 'Send' : m === 'allowance' ? 'Allowance' : 'Swap'}
+              </button>
+            ))}
+          </div>
           <div className="grid-side">
-            <PolicyCheck key={`${to}-${amount}-${asset}`} initialTo={to} initialAmount={amount} initialAsset={asset} />
+            {mode === 'send' && <PolicyCheck key={`${to}-${amount}-${asset}`} initialTo={to} initialAmount={amount} initialAsset={asset} />}
+            {mode === 'allowance' && <AllowanceForm />}
+            {mode === 'swap' && <SwapForm />}
             <section className="card">
               <h2>Today's limits</h2>
               <BudgetMeters budget={budget} />
             </section>
-            <BatchCard />
+            {mode === 'send' && <BatchCard />}
+            <X402Card />
           </div>
         </>
       ) : (

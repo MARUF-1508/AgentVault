@@ -42,6 +42,7 @@ export function harness(opts: {
   approver?: Approver;
   receipt?: (hash: string) => Promise<{ status: 'success' | 'reverted'; blockNumber: bigint; gasUsed: bigint }>;
   getTransactionReceipt?: (hash: string) => Promise<{ status: 'success' | 'reverted'; blockNumber: bigint; gasUsed: bigint }>;
+  getTransaction?: (hash: string) => Promise<{ input: `0x${string}`; from: string; to: string | null } | null>;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'av-test-'));
   const audit = new AuditLog(join(dir, 'audit.jsonl'));
@@ -61,6 +62,7 @@ export function harness(opts: {
         if (!opts.getTransactionReceipt) throw new Error('not found');
         return opts.getTransactionReceipt(hash);
       },
+      getTransaction: async ({ hash }: { hash: string }) => (opts.getTransaction ? opts.getTransaction(hash) : null),
     },
     walletClient: {
       sendTransaction: async (tx: SentTx) => {

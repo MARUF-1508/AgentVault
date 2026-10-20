@@ -161,3 +161,18 @@ test('security page shows the policy fingerprint and the guard rails', async ({ 
   await expect(page.locator('.card', { hasText: 'Policy fingerprint' }).locator('.mono')).toHaveText(/^[0-9a-f]{16}$/);
   await expect(page.getByRole('heading', { name: /on-chain guard/i })).toBeVisible();
 });
+
+test('an owner can pause and resume from the UI, with the password', async ({ page }) => {
+  await ensureSignedIn(page);
+
+  await page.getByRole('button', { name: /pause wallet/i }).click();
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(page.getByText(/kill switch is on/i)).toBeVisible();
+
+  await page.getByRole('button', { name: /resume signing/i }).click();
+  const dialog = page.getByRole('dialog', { name: /resume the wallet/i });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Your password').fill(PASS);
+  await dialog.getByRole('button', { name: /resume and allow signing/i }).click();
+  await expect(page.getByText(/kill switch is on/i)).toBeHidden();
+});

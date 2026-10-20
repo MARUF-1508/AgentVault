@@ -9,6 +9,7 @@ import {
   addUser,
   disableTotp,
   enableTotp,
+  generateWallet,
   getTotpStatus,
   getUsers,
   removeContact,
@@ -509,6 +510,96 @@ function AddressBook() {
   );
 }
 
+/**
+ * The signing key used to be created only by `npm run keygen`. The owner can do
+ * it here too: the server writes the key to the env file (never returns it) and
+ * the running process keeps the old key until it restarts.
+ */
+function AgentWallet() {
+  const { can, me } = useAuth();
+  const { status } = useWallet();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ address: string; previous: string | null; note: string } | null>(null);
+
+  const generate = (e: FormEvent) => {
+    e.preventDefault();
+    if (!password || !confirm || busy) return;
+    setBusy(true);
+    generateWallet(password)
+      .then((r) => {
+        setResult({ address: r.address, previous: r.previous, note: r.note });
+        setPassword('');
+        setConfirm(false);
+        setOpen(false);
+        toast.success('New signing key written to the env file. Restart the server to use it.');
+      })
+      .catch((err: Error) => toast.error(err.message))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <section className="card" id="agent-wallet">
+      <h2>Wallet</h2>
+      <dl className="fields">
+        <dt>Chain</dt>
+        <dd>
+          {status?.chain} ({status?.chainId})
+        </dd>
+        <dt>Address</dt>
+        <dd className="mono">
+          {status?.address ?? 'read-only (no key)'} {status?.address && <CopyButton value={status.address} />}
+        </dd>
+        <dt>Mode</dt>
+        <dd>{status?.vault ? 'Vault (on-chain caps)' : 'Direct (EOA)'}</dd>
+        <dt>Model</dt>
+        <dd>{status?.model ?? 'not configured'}</dd>
+      </dl>
+      {result && (
+        <p className="notice small">
+          New address <strong className="mono">{result.address}</strong> is in the env file. {result.note} Fund it from a Base Sepolia faucet, then restart the server.
+        </p>
+      )}
+      {can('admin') ? (
+        open ? (
+          <form className="stack-form" onSubmit={generate}>
+            <p className="muted small">
+              This replaces the agent key in the env file. The old key is not recoverable from the app: make sure you have a backup path before continuing. The server
+              keeps signing with the current key until it restarts.
+            </p>
+            <label>
+              <span>Your password</span>
+              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
+              <span>I understand the new key takes effect only after a restart.</span>
+            </label>
+            <div className="row">
+              <button type="submit" className="btn" disabled={busy || !password || !confirm}>
+                <KeyRound size={15} aria-hidden /> {busy ? 'Generating…' : 'Generate new wallet'}
+              </button>
+              <button type="button" className="ghost" onClick={() => setOpen(false)} disabled={busy}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="row">
+            <button className="ghost" onClick={() => setOpen(true)}>
+              <KeyRound size={15} aria-hidden /> {status?.address ? 'Replace the signing key' : 'Generate a wallet'}
+            </button>
+          </div>
+        )
+      ) : (
+        <p className="muted small">Your role ({me?.role}) cannot rotate the signing key. An owner can do it here or with `npm run keygen`.</p>
+      )}
+    </section>
+  );
+}
+
 export default function Settings() {
   usePageTitle('Settings');
   const { choice, setChoice } = useTheme();
@@ -568,23 +659,7 @@ export default function Settings() {
 
         <Security />
 
-        <section className="card">
-          <h2>Wallet</h2>
-          <dl className="fields">
-            <dt>Chain</dt>
-            <dd>
-              {status?.chain} ({status?.chainId})
-            </dd>
-            <dt>Address</dt>
-            <dd className="mono">
-              {status?.address ?? 'read-only (no key)'} {status?.address && <CopyButton value={status.address} />}
-            </dd>
-            <dt>Mode</dt>
-            <dd>{status?.vault ? 'Vault (on-chain caps)' : 'Direct (EOA)'}</dd>
-            <dt>Model</dt>
-            <dd>{status?.model ?? 'not configured'}</dd>
-          </dl>
-        </section>
+        <AgentWallet />
       </div>
 
       <Reveal>

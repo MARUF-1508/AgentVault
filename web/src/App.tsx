@@ -13,6 +13,7 @@ import Login from './pages/Login';
 // Secondary pages load on first visit, which keeps the first paint small.
 const Activity = lazy(() => import('./pages/Activity'));
 const Agent = lazy(() => import('./pages/Agent'));
+const Automation = lazy(() => import('./pages/Automation'));
 const Security = lazy(() => import('./pages/Security'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Transfer = lazy(() => import('./pages/Transfer'));
@@ -85,6 +86,7 @@ export default function App() {
                   <Route index element={<Dashboard />} />
                   <Route path="agent" element={page(<Agent />)} />
                   <Route path="transfer" element={page(<Transfer />)} />
+                  <Route path="automation" element={page(<Automation />)} />
                   <Route path="activity" element={page(<Activity />)} />
                   <Route path="security" element={page(<Security />)} />
                   <Route path="settings" element={page(<Settings />)} />

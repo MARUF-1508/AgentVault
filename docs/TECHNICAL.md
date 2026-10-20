@@ -206,7 +206,7 @@ safe as the read-only `what_if` agent tool and the `whatif` CLI command.
   non-loopback `Host` (DNS rebinding), a non-loopback `Origin` (another
   website) and any POST that is not `application/json`, so a page in the
   same browser cannot approve a T2 or trigger a transfer. The UI can pause the
-  wallet but not resume it; resuming stays CLI-only. Every response carries
+  wallet; an owner resumes from the UI only after re-entering the password (the CLI works too). Every response carries
   hardening headers: a CSP that allows only same-origin scripts (plus one
   hash-pinned bootstrap snippet, `src/web/server.ts`), `nosniff`,
   `no-referrer` and `X-Frame-Options: DENY`. Sessions are HttpOnly/SameSite

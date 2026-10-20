@@ -1,7 +1,7 @@
 # Agent Vault
 
 [![CI](https://github.com/MARUF-1508/AgentVault/actions/workflows/ci.yml/badge.svg)](https://github.com/MARUF-1508/AgentVault/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/unit%20tests-314%20passing-2563eb)
+![tests](https://img.shields.io/badge/unit%20tests-324%20passing-2563eb)
 ![WCAG 2.2 AA](https://img.shields.io/badge/WCAG%202.2-AA%20(axe%20in%20CI)-1d4ed8)
 ![testnet only](https://img.shields.io/badge/network-Base%20Sepolia%20testnet-0b1736)
 
@@ -73,7 +73,7 @@ Needs Node.js 20.19+ (24 recommended, see `.nvmrc`). No wallet, no LLM key, noth
 
 ```bash
 git clone https://github.com/MARUF-1508/AgentVault.git && cd AgentVault
-npm install && npm test                                   # 314 unit tests, offline
+npm install && npm test                                   # 324 unit tests, offline
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1   # T3 + the engine's compliant alternative
 npm --prefix web install && npm --prefix web run build    # build the web UI
 npm run cli -- serve                                      # http://127.0.0.1:5174 → create the owner account
@@ -101,7 +101,7 @@ actions and 5 policy refusals: [`docs/EXECUTION_EVIDENCE.md`](docs/EXECUTION_EVI
 | Two-line batch payment (both T1, both confirmed) | [`0xb6245068…`](https://sepolia.basescan.org/tx/0xb62450685da34f2794f92e1361d8c22e55ed4adfd0c80c28fedc582d3d8c39bc) · [`0xeca94314…`](https://sepolia.basescan.org/tx/0xeca9431472290ff0c1e5d8d663b74245e24ec1b0bcfa46321afdd3f6d214495c) ✅ |
 | ERC-4337 account deployed + session-key userOp through EntryPoint v0.7 | [`0x71c45789…` account](https://sepolia.basescan.org/address/0x71c457899cd25f52e4e49dacdcc84f890c1ea98c) · [userOp tx](https://sepolia.basescan.org/tx/0x164877c9b480a2ac77fd5c14540b8df9562340f68f71ab212ae5423576d0d6c1) ✅ |
 
-Tests: 314 unit (vitest) · 10 end-to-end incl. WCAG 2.2 AA (Playwright + axe) ·
+Tests: 324 unit (vitest) · 13 end-to-end incl. WCAG 2.2 AA (Playwright + axe) ·
 69 contract (Foundry), all run in CI on every push.
 
 ## What it can do
@@ -133,14 +133,14 @@ Tests: 314 unit (vitest) · 10 end-to-end incl. WCAG 2.2 AA (Playwright + axe) �
 git clone https://github.com/MARUF-1508/AgentVault.git
 cd AgentVault
 npm install
-npm test            # 314 tests, no network needed
+npm test            # 324 tests, no network needed
 ```
 
 ### 2. Create the agent's testnet wallet
 ```bash
 npm run keygen
 ```
-This creates `.env` from `.env.example`, generates a fresh key, stores it in `.env` (chmod 600, git-ignored) and prints the address. **Testnet only. Never put a key that holds real funds here.**
+This creates `.env` from `.env.example`, generates a fresh key, stores it in `.env` (chmod 600, git-ignored) and prints the address. The same action is in the UI: Settings → Wallet → Generate a wallet. **Testnet only. Never put a key that holds real funds here.**
 
 ### 3. Fund it
 Send a little Base Sepolia ETH to the printed address from any Base Sepolia faucet (Coinbase Developer Platform, Alchemy, QuickNode and others run one). For USDC, use Circle's testnet faucet (faucet.circle.com) and pick Base Sepolia.
@@ -228,23 +228,39 @@ On first start the UI shows a setup screen: create the first `owner` account and
 sign in. After that, owners add teammates with roles from Settings → Team (or
 the CLI: `npm run cli -- user add <name> <owner|operator|viewer>`).
 
-A multipage app (Dashboard, Agent, Transfer, Activity, Security, Settings) with
-a blue light and dark theme. It has sign-in with role-based access, chat with
+A multipage app (Dashboard, Agent, Transfer, Automation, Activity, Security,
+Settings) with a blue light and dark theme. It has sign-in with role-based access, chat with
 push-to-talk voice input and spoken replies, a tier preview that works without
 the LLM, and a T2 approval dialog that only owners can answer. An unanswered
 approval is rejected after two minutes. Owners can enable TOTP two-factor
 (Settings → Security, with QR code and "sign out all devices"); sessions
 expire after 30 idle minutes. The Security page shows the sha256 fingerprint
 of the live policy file, Activity can export the audit trail as CSV, and a T2
-request raises a desktop notification. There is also a pause button and an
-audit trail with explorer links. The server binds loopback only; never expose
-it. See `web/README.md`.
+request raises a desktop notification. The topbar has a pause button; resuming
+needs the owner's password again, and both directions are audit-logged. The
+server binds loopback only; never expose it. See `web/README.md`.
+
+**Everything the CLI can do is in the UI too** — the same routes the agent uses,
+never a shortcut around the policy engine:
+
+| CLI | Web UI |
+|---|---|
+| `npm run keygen` | Settings → Wallet → Generate / replace the signing key (owner password; takes effect on restart) |
+| `pause` / `resume` | Topbar Pause, then Resume signing (owner password) |
+| `approve` / `revoke` | Transfer → Allowance (bounded or unlimited, with tier preview) |
+| `swap` | Transfer → Swap (quote, bounded approval, policy-checked swap) |
+| `schedule list` / `run` | Automation (rules, background-runner status, dry run) |
+| `whatif` | Security → Policy simulator (read-only) |
+| `x402` | Transfer sidebar → Paid API (when `X402_API_URL` is set) |
+| `audit anchor` / `audit verify --onchain` | Security → On-chain audit anchors |
+| `recipient` / `deny` / `user` | Settings → Recipients / Address book / Team |
 
 The top bar shows the network and RPC health (click to re-check); if the RPC
 is down a banner says what still works and offers a retry. Transfer has a batch
-card and offers the engine's compliant alternative as a one-click amount;
+card, Allowance and Swap tabs, and offers the engine's compliant alternative as
+a one-click amount;
 Activity follows pending transactions until they settle and downloads a
-compliance report; Settings has the address book. The UI is keyboard-operable
+compliance report; Settings has the address book and the signing-key card. The UI is keyboard-operable
 end to end (skip link, focus-trapped dialogs, Escape to close), announces
 verdicts and results through a live region, and meets WCAG 2.2 AA contrast in
 both themes; `e2e/wcag.spec.ts` runs axe-core over every page in CI.
@@ -293,7 +309,7 @@ OpenAI-compatible LLM tier, Foundry, Vite.
 **Zero-key path (2 minutes, no wallet, no LLM key):**
 
 ```bash
-npm install && npm test                # 314 unit tests, offline
+npm install && npm test                # 324 unit tests, offline
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 0.0002   # T1 verdict, nothing sent
 npm run cli -- preview 0x4785Dca37A242F3D80f844CB0b143A687008a2B5 1        # T3 verdict + reasons
 npm run cli -- audit verify             # tamper check (empty log reads intact)
@@ -311,7 +327,7 @@ address you control). All demo amounts are tiny on purpose. A ready-made
 | Criterion | Where |
 |---|---|
 | Task completion (40%) | `docs/DEMO.md` (working flow), `src/agent/`, `src/policy/`, `src/executor/`; live hashes in `docs/EXECUTION_EVIDENCE.md` |
-| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R24), `test/` (314 unit + 69 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
+| Security & compliance (30%) | `docs/SECURITY_SELF_ASSESSMENT.md` (tiers, controls, known risks R1–R24), `test/` (324 unit + 69 Foundry + Playwright/axe), `contracts/AgentVault.sol`, compliance report (`GET /api/compliance`) |
 | Innovation & interaction (30%) | Engine-proven compliant alternatives, EN/中文 agent, batch payments, rebalancing planner, Telegram and email approvals, decoded-calldata approval card, on-chain audit anchors, ERC-4337 session keys, WCAG 2.2 AA UI, tier preview without LLM, counterfactual **what-if** simulator, **task budget envelope**, **stale-allowance cleanup**, voice chat, policy fingerprint, explanation of every decision, x402 **v2** paid-data flow |
 | On-chain bonus (0–5) | `AgentVault.sol` limits + live reverted over-limit calls; `AgentVaultV2.sol` session keys + ERC-20; vault-routing mode; x402 payment — with tx hashes in `docs/EXECUTION_EVIDENCE.md`; `SessionKeyAccount.sol` ERC-4337 account (deployed; live session-key userOp through EntryPoint v0.7); on-chain audit anchors |
 | Architecture / technical doc | `docs/TECHNICAL.md` |
@@ -345,7 +361,7 @@ src/
   x402.ts                 paid-API client (x402 v2), policy-gated payment
 contracts/                AgentVault (v1, deployed), AgentVaultV2 (session keys + ERC-20), SessionKeyAccount (ERC-4337)
 script/                   Foundry deploy scripts for all three contracts
-test/                     vitest unit + integration tests (38 files, 314 tests)
+test/                     vitest unit + integration tests (40 files, 324 tests)
 test/contracts/           Foundry tests: AgentVault 12, AgentVaultV2 37, SessionKeyAccount 20 (incl. fuzzing)
 e2e/                      Playwright smoke + WCAG 2.2 AA (axe) against the real server and built UI
 web/                      Vite + React UI
@@ -372,7 +388,7 @@ Every state-changing action is checked against `config/policy.json` → `risk` i
 
 ## Tests
 ```bash
-npm test          # 314 unit + integration tests (vitest), offline
+npm test          # 324 unit + integration tests (vitest), offline
 npm run typecheck
 npm run e2e       # Playwright smoke + WCAG 2.2 AA axe scan (build the UI first)
 npm run check     # typecheck + tests + web typecheck + web build
@@ -434,7 +450,7 @@ Agent Vault 是一个运行在 **Base Sepolia 测试网**上的 AI 钱包代理�
 链上 `AgentVault` 合约作为最终兜底（私钥被盗也无法超过单日限额）。所有动作写入
 防篡改哈希链审计日志；策略、限额、白名单和急停开关对模型完全只读。
 
-快速开始：`npm install && npm test`（314 个离线测试）→ `npm run cli -- preview <地址> 0.0002`
+快速开始：`npm install && npm test`（324 个离线测试）→ `npm run cli -- preview <地址> 0.0002`
 （查看 T1/T3 判定，不发交易）→ 按 README Setup 生成密钥并领测试币 → `npm run cli -- serve`
 打开本机网页界面（含 T2 审批卡与审计导出）。完整演示脚本见 `docs/DEMO.md`。
 

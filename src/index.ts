@@ -236,7 +236,7 @@ async function main() {
   }
 }
 
-/** user add <name> <role> | user list | user remove <name>. CLI-only by design. */
+/** user add <name> <role> | user list | user remove <name>. Also in Settings → Team. */
 function userCommand(users: UserStore, args: string[]): void {
   const [sub, name, role] = args;
   if (sub === 'add' && name && ROLES.includes(role as Role)) {

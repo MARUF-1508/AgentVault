@@ -9,6 +9,7 @@ import { ApprovalProvider, useApproval } from '../approval';
 import { useAuth } from '../auth';
 import ApprovalModal from '../components/ApprovalModal';
 import CommandPalette from '../components/CommandPalette';
+import ResumeWallet from '../components/ResumeWallet';
 import OfflineBanner from '../components/OfflineBanner';
 import { useWallet } from '../data';
 import { shortAddr } from '../format';
@@ -129,16 +130,16 @@ function UserMenu() {
   );
 }
 
-function PauseControl() {
+function PauseControl({ onResume }: { onResume: () => void }) {
   const { can } = useAuth();
   const { status, refresh } = useWallet();
   const [confirming, setConfirming] = useState(false);
   if (!status || !can('pause')) return null;
   if (status.paused) {
     return (
-      <span className="pill pill-bad" title="Resume from the CLI: npm run cli -- resume">
+      <button className="pill pill-bad" onClick={onResume} disabled={!can('admin')} title={can('admin') ? 'Resume signing (owner password required)' : 'Ask an owner to resume the wallet'}>
         <span className="dot bad" /> Paused
-      </span>
+      </button>
     );
   }
   if (confirming) {
@@ -166,7 +167,7 @@ function PauseControl() {
     );
   }
   return (
-    <button className="danger" onClick={() => setConfirming(true)} title="Kill switch. Resuming is CLI-only.">
+    <button className="danger" onClick={() => setConfirming(true)} title="Kill switch. Only an owner can resume, with the password again.">
       <OctagonPause size={16} aria-hidden /> <span className="hide-sm">Pause wallet</span>
     </button>
   );
@@ -238,11 +239,13 @@ function RpcBanner() {
 
 function Shell() {
   const { resolved, toggle } = useTheme();
+  const { can } = useAuth();
   const { status } = useWallet();
   const location = useLocation();
   const outlet = useOutlet();
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const firstRoute = useRef(true);
@@ -342,7 +345,7 @@ function Shell() {
                 ⌘K
               </kbd>
             </button>
-            <PauseControl />
+            <PauseControl onResume={() => setResumeOpen(true)} />
             <button className="ghost icon" onClick={toggle} aria-label={`Switch to ${resolved === 'dark' ? 'light' : 'dark'} theme`} title="Toggle theme">
               <AnimatePresence mode="wait" initial={false}>
                 <motion.span
@@ -366,7 +369,14 @@ function Shell() {
 
         {status?.paused && (
           <p className="banner bad">
-            The kill switch is on, so every transaction is refused. Run <code>npm run cli -- resume</code> to turn it off.
+            The kill switch is on, so every transaction is refused.{' '}
+            {can('admin') ? (
+              <button className="link-btn" onClick={() => setResumeOpen(true)}>
+                Resume signing
+              </button>
+            ) : (
+              'Ask an owner to resume it from their account.'
+            )}
           </p>
         )}
 
@@ -389,6 +399,7 @@ function Shell() {
       </div>
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <ResumeWallet open={resumeOpen} onClose={() => setResumeOpen(false)} />
       <ApprovalModal />
     </div>
   );

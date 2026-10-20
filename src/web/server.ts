@@ -9,12 +9,14 @@ import { chatTurn } from '../agent/agent.js';
 import { runTool, type ToolContext } from '../agent/tools.js';
 import type { WebApprover } from '../approval/approver.js';
 import { EmailApprover, verifyLink } from '../approval/email.js';
+import { verifyAnchors } from '../audit/anchor.js';
 import { redactText } from '../audit/redact.js';
 import { can, permissionsOf, ROLES, type Permission } from '../auth/rbac.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from '../auth/totp.js';
 import { LoginThrottle, Sessions, type User, type UserStore } from '../auth/users.js';
+import { writeAgentKey } from '../chain/keygen.js';
 import type { Env } from '../config.js';
-import { pauseWallet } from '../policy/killswitch.js';
+import { pauseWallet, resumeWallet } from '../policy/killswitch.js';
 import { parseBatch } from '../executor/batch.js';
 import { explainTier } from '../policy/alternative.js';
 import { addContact, addDenied, addRecipient, applyPolicy, removeContact, removeDenied, removeRecipient, writePolicyAtomic } from '../policy/edit.js';
@@ -24,6 +26,8 @@ import { ActionIntentSchema, IntentSchema } from '../policy/types.js';
 import { buildComplianceReport } from '../report/compliance.js';
 import { dailyStats } from '../report/stats.js';
 import type { SchedulerStatus } from '../schedule/background.js';
+import { loadSchedules, type Schedules } from '../schedule/rules.js';
+import { runDueRules } from '../schedule/runner.js';
 import { RateLimiter } from './ratelimit.js';
 
 export interface WebServerOptions {
@@ -55,8 +59,14 @@ const BUCKET: Record<string, string> = {
   'POST /api/chat': 'chat',
   'POST /api/transact': 'transact',
   'POST /api/batch': 'transact',
+  'POST /api/swap': 'transact',
+  'POST /api/schedules/run': 'transact',
+  'POST /api/audit/anchor': 'transact',
+  'POST /api/x402': 'transact',
   'POST /api/preview': 'preview',
   'POST /api/batch/preview': 'preview',
+  'POST /api/swap/quote': 'preview',
+  'POST /api/whatif': 'preview',
 };
 /** Chat histories kept per user, and in total (oldest dropped first). */
 const MAX_CHATS_PER_USER = 5;
@@ -87,6 +97,19 @@ export const ROUTES: Record<string, Permission> = {
   'POST /api/chat': 'chat',
   'POST /api/decide': 'approve',
   'POST /api/pause': 'pause',
+  // Resuming re-enables spending, so it is owner-only and asks for the
+  // password again (see the handler). The kill switch is never an LLM tool.
+  'POST /api/resume': 'admin',
+  // Rotating the signing key is an owner action, never offered to the model.
+  'POST /api/wallet/generate': 'admin',
+  'GET /api/schedules': 'read',
+  'POST /api/schedules/run': 'transact',
+  'GET /api/audit/anchors': 'read',
+  'POST /api/audit/anchor': 'admin',
+  'POST /api/whatif': 'preview',
+  'POST /api/swap/quote': 'preview',
+  'POST /api/swap': 'transact',
+  'POST /api/x402': 'transact',
   // Recipient lists. Owner-only ('admin'), never a tool, so the LLM cannot reach
   // them. The two directions that lower a recipient's tier also need the owner's
   // password again.
@@ -134,6 +157,30 @@ const AddRecipientSchema = z.object({ label: z.string(), address: z.string(), pa
 const RemoveRecipientSchema = z.object({ label: z.string() });
 const DenySchema = z.object({ address: z.string() });
 const UndenySchema = z.object({ address: z.string(), password: z.string().max(200).optional() });
+const PasswordSchema = z.object({ password: z.string().min(1).max(200) });
+const GenerateWalletSchema = z.object({ password: z.string().min(1).max(200), confirm: z.literal('new-wallet') });
+const ScheduleRunSchema = z.object({ dryRun: z.boolean().optional() });
+const WhatIfSchema = z.object({
+  to: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'recipient must be a 0x address'),
+  amount: z.string().regex(/^\d+(\.\d+)?$/, 'amount must be a decimal string'),
+  token: z.string().min(1).optional(),
+  allow: z.boolean().optional(),
+  paused: z.boolean().optional(),
+  limits: z
+    .object({
+      autoMaxPerTx: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+      hardMaxPerTx: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+      dailyBudget: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+    })
+    .optional(),
+});
+const SwapRequestSchema = z.object({
+  tokenIn: z.string().min(1),
+  tokenOut: z.string().min(1),
+  amountIn: z.string().regex(/^\d+(\.\d+)?$/),
+  slippageBps: z.number().int().min(0).max(10_000).optional(),
+});
+const X402Schema = z.object({ url: z.string().url().optional() });
 
 function cookieToken(req: IncomingMessage): string | undefined {
   for (const part of (req.headers.cookie ?? '').split(';')) {
@@ -443,7 +490,7 @@ export function createServer(opts: WebServerOptions): Server {
         return send(res, 200, { ok: true });
       }
       // First-run setup: the only moment an account can be created without an
-      // owner. Later accounts are owner-managed (/api/users) or CLI-only.
+      // owner. Later accounts are owner-managed (/api/users) or from the CLI.
       if (req.method === 'GET' && path === '/api/auth/setup') {
         return send(res, 200, { needed: users.list().length === 0 });
       }
@@ -551,6 +598,7 @@ export function createServer(opts: WebServerOptions): Server {
           velocity: ctx.policy.rateLimit.velocity ?? null,
           scheduler: opts.scheduler ?? null,
           pendingTxs: ctx.executor.pendingTxs().length,
+          x402: Boolean(env.X402_API_URL),
         });
       }
       if (req.method === 'GET' && path === '/api/budget') {
@@ -559,6 +607,194 @@ export function createServer(opts: WebServerOptions): Server {
       if (req.method === 'POST' && path === '/api/pause') {
         pauseWallet(env.PAUSE_FILE, ctx.audit, 'web', user!.username);
         return send(res, 200, { paused: true });
+      }
+      // Releasing the kill switch re-enables spending, so the owner has to
+      // confirm the password again (same rule as the two escalating allowlist
+      // edits). Operators may pull the switch; only an owner may release it.
+      if (req.method === 'POST' && path === '/api/resume') {
+        const parsed = PasswordSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { password }.' });
+        if (!users.verify(user!.username, parsed.data.password)) {
+          throttle.fail(user!.username);
+          return send(res, 401, { error: 'Wrong password.' });
+        }
+        resumeWallet(env.PAUSE_FILE, ctx.audit, 'web', user!.username);
+        return send(res, 200, { paused: false });
+      }
+      // Wallet generation used to exist only as `npm run keygen`. The key is
+      // written to the env file (chmod 600) and never returned or logged; the
+      // response carries only the public address. It takes effect on restart.
+      if (req.method === 'POST' && path === '/api/wallet/generate') {
+        const parsed = GenerateWalletSchema.safeParse(await readBody(req));
+        if (!parsed.success) {
+          return send(res, 400, { error: 'Body must be { password, confirm: "new-wallet" }.' });
+        }
+        if (!users.verify(user!.username, parsed.data.password)) {
+          throttle.fail(user!.username);
+          return send(res, 401, { error: 'Wrong password.' });
+        }
+        try {
+          const r = writeAgentKey(env.ENV_FILE, { force: true });
+          ctx.audit.append('access', {
+            event: 'wallet_generated',
+            by: user!.username,
+            address: r.address,
+            previous: r.previous,
+          });
+          return send(res, 200, {
+            address: r.address,
+            previous: r.previous,
+            restartRequired: true,
+            note: 'The running server keeps signing with the old key until it restarts. Fund the new address first; with VAULT=true, authorize the new agent on the vault too.',
+          });
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          return send(res, code === 'EROFS' || code === 'EACCES' ? 409 : 500, {
+            error:
+              code === 'EROFS' || code === 'EACCES'
+                ? `The env file (${env.ENV_FILE}) is not writable in this deployment.`
+                : 'Could not write the env file.',
+          });
+        }
+      }
+      // Scheduled / conditional rules: the CLI's `schedule list|run`, with the
+      // same runner, so each due rule still goes through the executor.
+      if (req.method === 'GET' && path === '/api/schedules') {
+        let schedules: Schedules;
+        try {
+          schedules = existsSync(env.SCHEDULES_FILE) ? loadSchedules(env.SCHEDULES_FILE) : { version: 1, rules: [] };
+        } catch (err) {
+          return send(res, 400, { error: `Could not read ${env.SCHEDULES_FILE}: ${err instanceof Error ? err.message : String(err)}` });
+        }
+        const lastRuns = new Map<string, { ruleId: string; ts: string; status?: unknown; txHash?: unknown; error?: unknown }>();
+        for (const e of ctx.audit.read()) {
+          if (e.type !== 'schedule' || typeof e.data.ruleId !== 'string') continue;
+          lastRuns.set(e.data.ruleId, {
+            ruleId: e.data.ruleId,
+            ts: e.ts,
+            status: e.data.status,
+            txHash: e.data.txHash,
+            error: e.data.error,
+          });
+        }
+        return send(res, 200, {
+          version: schedules.version,
+          rules: schedules.rules,
+          scheduler: opts.scheduler ?? null,
+          lastRuns: [...lastRuns.values()],
+        });
+      }
+      if (req.method === 'POST' && path === '/api/schedules/run') {
+        const parsed = ScheduleRunSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'Body must be { dryRun?: boolean }.' });
+        let schedules: Schedules;
+        try {
+          schedules = existsSync(env.SCHEDULES_FILE) ? loadSchedules(env.SCHEDULES_FILE) : { version: 1, rules: [] };
+        } catch (err) {
+          return send(res, 400, { error: `Could not read ${env.SCHEDULES_FILE}: ${err instanceof Error ? err.message : String(err)}` });
+        }
+        try {
+          const results = await runDueRules(
+            { clients: ctx.clients, policy: ctx.policy, executor: ctx.executor, audit: ctx.audit, schedules },
+            { dryRun: parsed.data.dryRun },
+          );
+          return send(res, 200, { ran: results.length, results });
+        } catch (err) {
+          return send(res, 502, { error: `Could not run schedules: ${err instanceof Error ? err.message : String(err)}` });
+        }
+      }
+      // Read-only counterfactual: same pure what-if engine the CLI and the
+      // what_if tool use. It cannot change the policy or move funds.
+      if (req.method === 'POST' && path === '/api/whatif') {
+        const parsed = WhatIfSchema.safeParse(await readBody(req));
+        if (!parsed.success) {
+          return send(res, 400, { error: parsed.error.issues.map((i) => i.message).join('; ') });
+        }
+        const d = parsed.data;
+        const intent = IntentSchema.safeParse(
+          d.token ? { kind: 'erc20_transfer', token: d.token, to: d.to, amount: d.amount } : { kind: 'native_transfer', to: d.to, amount: d.amount },
+        );
+        if (!intent.success) return send(res, 400, { error: intent.error.issues.map((i) => i.message).join('; ') });
+        const limits: { autoMaxPerTx?: string; hardMaxPerTx?: string; dailyBudget?: string } = {};
+        if (d.limits?.autoMaxPerTx) limits.autoMaxPerTx = d.limits.autoMaxPerTx;
+        if (d.limits?.hardMaxPerTx) limits.hardMaxPerTx = d.limits.hardMaxPerTx;
+        if (d.limits?.dailyBudget) limits.dailyBudget = d.limits.dailyBudget;
+        try {
+          const result = await ctx.executor.whatIf(intent.data, {
+            ...(d.allow ? { allowRecipients: [d.to as `0x${string}`] } : {}),
+            ...(d.paused ? { paused: true } : {}),
+            ...(Object.keys(limits).length > 0 ? { limits } : {}),
+          });
+          return send(res, 200, result);
+        } catch (err) {
+          return send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      // Swap quote and execution mirror `get_swap_quote` / `execute_swap`, so
+      // the UI gets the bounded approval-then-swap orchestration, not a raw
+      // approval the user could be tricked into leaving behind.
+      if (req.method === 'POST' && path === '/api/swap/quote') {
+        const parsed = SwapRequestSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: parsed.error.issues.map((i) => i.message).join('; ') });
+        return send(res, 200, await runTool('get_swap_quote', JSON.stringify(parsed.data), ctx));
+      }
+      if (req.method === 'POST' && path === '/api/swap') {
+        const parsed = SwapRequestSchema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: parsed.error.issues.map((i) => i.message).join('; ') });
+        if (!ctx.policy.swap) return send(res, 400, { error: 'Swaps are not enabled in the policy.' });
+        const full = { ...parsed.data, slippageBps: parsed.data.slippageBps ?? ctx.policy.swap.autoMaxSlippageBps };
+        if (full.tokenIn === full.tokenOut) return send(res, 400, { error: 'tokenIn and tokenOut must differ.' });
+        return send(res, 200, await runTool('execute_swap', JSON.stringify(full), ctx));
+      }
+      // Paid-API fetch (x402). The tool enforces the configured origin, so the
+      // route cannot be used as an SSRF proxy.
+      if (req.method === 'POST' && path === '/api/x402') {
+        if (!env.X402_API_URL) return send(res, 400, { error: 'The paid API is not configured (set X402_API_URL).' });
+        const parsed = X402Schema.safeParse(await readBody(req));
+        if (!parsed.success) return send(res, 400, { error: 'url must be an absolute URL.' });
+        return send(res, 200, await runTool('fetch_paid_data', JSON.stringify({ url: parsed.data.url ?? env.X402_API_URL }), ctx));
+      }
+      // On-chain audit anchors, matching `audit anchor` / `audit verify --onchain`.
+      if (req.method === 'GET' && path === '/api/audit/anchors') {
+        const local = ctx.audit.verify();
+        try {
+          const onchain = await verifyAnchors(
+            ctx.audit.read(),
+            async (hash) => {
+              const tx = await ctx.clients.publicClient.getTransaction({ hash });
+              return tx ? { input: tx.input, from: tx.from, to: tx.to } : null;
+            },
+            { wallet: ctx.clients.account?.address },
+          );
+          return send(res, 200, {
+            local,
+            onchain,
+            ...(onchain.checks.length === 0 ? { note: 'No anchors yet. Anchor the log once to make this check meaningful.' } : {}),
+          });
+        } catch (err) {
+          return send(res, 502, { error: `Could not read anchors: ${err instanceof Error ? err.message : String(err)}` });
+        }
+      }
+      if (req.method === 'POST' && path === '/api/audit/anchor') {
+        const head = ctx.audit.read().at(-1);
+        if (!head) return send(res, 400, { error: 'The audit log is empty; nothing to anchor.' });
+        try {
+          const r = await ctx.executor.execute({ kind: 'audit_anchor', seq: head.seq, headHash: head.hash });
+          if (r.status === 'executed' && r.txHash) {
+            ctx.audit.append('anchor', { seq: head.seq, headHash: head.hash, txHash: r.txHash, explorerUrl: r.explorerUrl });
+          }
+          return send(res, 200, {
+            status: r.status,
+            anchoredSeq: head.seq,
+            headHash: head.hash,
+            txHash: r.txHash,
+            explorerUrl: r.explorerUrl,
+            error: r.error,
+            reasons: r.decision.reasons,
+          });
+        } catch (err) {
+          return send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
       }
       // Owner-only account management. Passwords are generated server-side and
       // returned exactly once; neither the LLM nor the web can read them again.
