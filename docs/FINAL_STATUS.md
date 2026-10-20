@@ -20,7 +20,7 @@ what-if, the x402 demo and audit anchoring. The counts below include it.
 | Typecheck (web UI) | local, `npm --prefix web run typecheck` | clean |
 | UI production build | local, `npm --prefix web run build` | built, no chunk-size warning (pages are lazy-loaded) |
 | End-to-end + WCAG 2.2 AA | local, `npm run e2e` (bundled Chromium) | **13 passed / 13**: 8 smoke flows (incl. phone-width overflow guards, the agent hand-off layout and pause→resume with the password), axe-core over the sign-in page and all 7 app pages in light **and** dark, keyboard contract, live region |
-| GitHub Actions CI | runs `39241874743` (push) and `39241879886` (PR #4) on commit `378037a` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (10/10), Foundry (69/69), Docker build |
+| GitHub Actions CI | run `39403687188` on commit `2a77a17` | **all 4 jobs green**: typecheck/tests/UI build, e2e + axe (13/13), Foundry (69/69), Docker build |
 | Foundry contract tests | CI `contracts` job and local `forge test` | **69 passed / 69** (AgentVault v1: 12, AgentVaultV2: 37, SessionKeyAccount: 20); Foundry was installed locally before the final run and the full suite passes there too |
 | Lockfiles | local, `npm ci` (root and `web/`) | install cleanly |
 | Lint | — | no linter is configured in the repo |
